@@ -24,6 +24,14 @@ import { computeThreatScore } from '../helpers/threatScorer.js';
 import { extractAndClassifyClaims, getClaimSummary } from '../helpers/claimExtractor.js';
 import { buildThreatFeatures } from '../helpers/threatFeatureBuilder.js';
 import { computeEnhancedThreatScore, THREAT_FAMILIES } from '../helpers/threatScorerV2.js';
+import { buildThreatGraph, mergeGraphs } from '../helpers/threatGraphBuilder.js';
+import { correlateAnalysis, clusterAnalyses } from '../helpers/campaignCorrelator.js';
+import {
+  ALL_PATTERNS, DIGITAL_THREAT_PATTERNS, AML_PATTERNS,
+  matchThreatFamilyToPattern, createUnifiedClassificationResult,
+  GRAPH_NODE_TYPES, GRAPH_EDGE_TYPES
+} from '../types/patternRegistry.js';
+import { ALL_FIXTURES, FIXTURE_BY_CODE } from '../data/digitalThreatFixtures.js';
 
 const router = express.Router();
 
@@ -226,115 +234,200 @@ router.post('/analyze', async (req, res) => {
 
 /**
  * POST /api/threats/graph
- * 
- * Convert the result into a graph payload that the frontend can render
+ *
+ * Build a rich threat investigation graph from one analysis result.
+ * Uses the expanded graph builder supporting all digital-threat node/edge types.
  */
 router.post('/graph', async (req, res) => {
   try {
-    const { analysis } = req.body;
-    
+    const { analysis, campaign_id, campaign_label } = req.body;
+
     if (!analysis) {
-      return res.status(400).json({
-        error: 'Missing analysis in request body'
-      });
+      return res.status(400).json({ error: 'Missing analysis in request body' });
     }
-    
-    const nodes = [];
-    const edges = [];
-    
-    // Create artifact node
-    const artifactNode = {
-      id: `artifact_${analysis.artifact_id}`,
-      type: 'artifact',
-      label: analysis.artifact_summary.input_type,
-      properties: {
-        input_type: analysis.artifact_summary.input_type,
-        submission_time: analysis.artifact_summary.metadata?.submission_time
-      }
-    };
-    nodes.push(artifactNode);
-    
-    // Create nodes for indicators
-    analysis.indicators.forEach((indicator, idx) => {
-      const nodeId = `indicator_${indicator.type}_${idx}`;
-      nodes.push({
-        id: nodeId,
-        type: indicator.type,
-        label: indicator.value,
-        properties: {
-          confidence: indicator.confidence,
-          value: indicator.value
-        }
-      });
-      
-      // Connect to artifact
-      edges.push({
-        source: artifactNode.id,
-        target: nodeId,
-        type: 'CONTAINS',
-        properties: { indicator_type: indicator.type }
-      });
-    });
-    
-    // Create nodes for entities
-    analysis.entities.forEach((entity, idx) => {
-      const nodeId = `entity_${entity.entity_type}_${idx}`;
-      nodes.push({
-        id: nodeId,
-        type: entity.entity_type,
-        label: entity.value,
-        properties: {
-          role: entity.role,
-          ...entity.attributes
-        }
-      });
-      
-      // Connect to artifact
-      edges.push({
-        source: artifactNode.id,
-        target: nodeId,
-        type: 'MENTIONS',
-        properties: { entity_type: entity.entity_type }
-      });
-    });
-    
-    // Create threat graph payload
-    const graphPayload = createThreatGraphPayload(nodes, edges, {
-      analysis_id: analysis.analysis_id,
-      risk_score: analysis.risk_score.overall_score,
-      severity: analysis.risk_score.severity
-    });
-    
+
+    const graph = buildThreatGraph(analysis, { campaign_id, campaign_label });
+
+    // Attach unified pattern classification to response
+    const threatFamily = analysis.classification?.primary_family;
+    const patternMeta = threatFamily ? matchThreatFamilyToPattern(threatFamily) : null;
+
     res.json({
       success: true,
-      graph: graphPayload
+      graph,
+      pattern: patternMeta ? {
+        code: patternMeta.code,
+        label: patternMeta.label,
+        name: patternMeta.name,
+        family: patternMeta.family,
+        severity: patternMeta.severity
+      } : null
     });
-    
+
   } catch (error) {
     console.error('Graph generation error:', error);
-    res.status(500).json({
-      error: 'Failed to generate graph',
-      message: error.message
-    });
+    res.status(500).json({ error: 'Failed to generate graph', message: error.message });
   }
 });
 
 /**
+ * POST /api/threats/correlate
+ *
+ * Compare one analysis against a list of reference analyses.
+ * Returns correlation score, matching dimensions, and campaign hints.
+ */
+router.post('/correlate', async (req, res) => {
+  try {
+    const { target, references } = req.body;
+
+    if (!target) {
+      return res.status(400).json({ error: 'Missing target analysis' });
+    }
+
+    // If no references provided, use the T1-T6 fixtures as the reference set
+    const refs = Array.isArray(references) && references.length > 0
+      ? references
+      : ALL_FIXTURES;
+
+    const result = correlateAnalysis(target, refs);
+
+    res.json({
+      success: true,
+      correlation: result
+    });
+
+  } catch (error) {
+    console.error('Correlation error:', error);
+    res.status(500).json({ error: 'Failed to correlate analysis', message: error.message });
+  }
+});
+
+/**
+ * POST /api/threats/graph/merge
+ *
+ * Merge multiple analysis results into one unified graph.
+ * Optionally adds a campaign hub node connecting all artifact nodes.
+ */
+router.post('/graph/merge', async (req, res) => {
+  try {
+    const { analyses, campaign_id, campaign_label } = req.body;
+
+    if (!Array.isArray(analyses) || analyses.length < 2) {
+      return res.status(400).json({ error: 'Provide at least 2 analyses to merge' });
+    }
+
+    // Build individual graphs first
+    const graphs = analyses.map(a => buildThreatGraph(a, {}));
+
+    // Cluster correlation
+    const clusters = clusterAnalyses(analyses);
+
+    // Merge into one graph
+    const mergedGraph = mergeGraphs(graphs, campaign_id ? { campaign_id, campaign_label } : null);
+
+    res.json({
+      success: true,
+      graph: mergedGraph,
+      clusters
+    });
+
+  } catch (error) {
+    console.error('Merge error:', error);
+    res.status(500).json({ error: 'Failed to merge graphs', message: error.message });
+  }
+});
+
+/**
+ * GET /api/threats/patterns
+ *
+ * Return the full pattern registry (P1-P6 AML + T1-T6 digital threat).
+ */
+router.get('/patterns', (req, res) => {
+  res.json({
+    success: true,
+    aml_patterns: AML_PATTERNS.map(p => ({
+      code: p.code,
+      label: p.label,
+      name: p.name,
+      family: p.family,
+      description: p.description,
+      severity: p.severity,
+      key_features: p.key_features
+    })),
+    digital_threat_patterns: DIGITAL_THREAT_PATTERNS.map(p => ({
+      code: p.code,
+      label: p.label,
+      name: p.name,
+      family: p.family,
+      description: p.description,
+      severity: p.severity,
+      key_features: p.key_features,
+      threat_family_match: p.threat_family_match
+    })),
+    total: ALL_PATTERNS.length
+  });
+});
+
+/**
+ * GET /api/threats/fixtures
+ *
+ * Return all T1-T6 synthetic sample fixtures (for demos and correlation testing).
+ */
+router.get('/fixtures', (req, res) => {
+  res.json({
+    success: true,
+    fixtures: ALL_FIXTURES.map(f => ({
+      analysis_id: f.analysis_id,
+      pattern_code: f.pattern_code,
+      input_type: f.artifact_summary?.input_type,
+      severity: f.risk_score?.severity,
+      overall_score: f.risk_score?.overall_score,
+      threat_family: f.classification?.primary_family,
+      indicator_count: f.indicators?.length,
+      claim_count: f.claims?.length
+    })),
+    total: ALL_FIXTURES.length
+  });
+});
+
+/**
+ * GET /api/threats/fixtures/:code
+ *
+ * Return one T-pattern fixture by code (T1..T6).
+ */
+router.get('/fixtures/:code', (req, res) => {
+  const code = (req.params.code || '').toUpperCase();
+  const fixture = FIXTURE_BY_CODE[code];
+  if (!fixture) {
+    return res.status(404).json({ error: `No fixture found for code: ${code}` });
+  }
+  res.json({ success: true, fixture });
+});
+
+/**
  * GET /api/threats/health
- * 
+ *
  * Health check endpoint
  */
 router.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     service: 'threat-analysis',
-    version: '1.0.0',
+    version: '2.0.0',
     endpoints: [
-      '/normalize',
-      '/extract',
-      '/analyze',
-      '/graph'
-    ]
+      'POST /normalize',
+      'POST /extract',
+      'POST /analyze',
+      'POST /graph',
+      'POST /correlate',
+      'POST /graph/merge',
+      'GET  /patterns',
+      'GET  /fixtures',
+      'GET  /fixtures/:code',
+      'GET  /health'
+    ],
+    pattern_count: ALL_PATTERNS.length,
+    fixture_count: ALL_FIXTURES.length
   });
 });
 

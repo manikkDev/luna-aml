@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from 'react';
-import { Shield, Upload, Link as LinkIcon, FileText, Image as ImageIcon, Mail, MessageSquare, AlertTriangle } from 'lucide-react';
+import { Shield, Upload, Link as LinkIcon, FileText, Image as ImageIcon, Mail, MessageSquare, AlertTriangle, GitMerge, Network } from 'lucide-react';
 import { SERVER_URL_1 } from '@/utils/commonHelper';
+import ThreatGraphViewer from '@/components/ThreatGraphViewer';
+import PatternResult from '@/components/PatternResult';
 
 const INPUT_MODES = [
   { id: 'email_text', label: 'Phishing Email', icon: Mail, description: 'Analyze suspicious email content' },
@@ -22,6 +24,11 @@ export default function AnalyzePage() {
   const [notes, setNotes] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
+  const [graphData, setGraphData] = useState(null);
+  const [correlation, setCorrelation] = useState(null);
+  const [patternResult, setPatternResult] = useState(null);
+  const [activeTab, setActiveTab] = useState('analysis');
+  const [isBuildingGraph, setIsBuildingGraph] = useState(false);
   const [error, setError] = useState(null);
 
   const handleAnalyze = async () => {
@@ -76,7 +83,34 @@ export default function AnalyzePage() {
       }
 
       const analyzeData = await analyzeResponse.json();
-      setAnalysisResult(analyzeData.analysis);
+      const analysis = analyzeData.analysis;
+      setAnalysisResult(analysis);
+
+      // Build pattern result from classification
+      if (analysis?.classification) {
+        const family = analysis.classification.primary_family;
+        const patternMeta = matchThreatFamilyToPatternCode(family);
+        setPatternResult({
+          pattern_code: patternMeta || 'T?',
+          pattern_label: `${patternMeta || 'T?'} — ${family?.replace(/_/g, ' ') || 'Unknown'}`,
+          family: 'digital_threat',
+          risk_score: (analysis.risk_score?.overall_score || 0) / 100,
+          confidence: (analysis.risk_score?.confidence || 0.7),
+          severity: analysis.risk_score?.severity || 'medium',
+          decision: (analysis.risk_score?.overall_score || 0) >= 75 ? 'highly_suspicious'
+            : (analysis.risk_score?.overall_score || 0) >= 50 ? 'likely_suspicious' : 'not_suspicious',
+          top_features: analysis.risk_score?.reasons?.slice(0, 5) || [],
+          evidence_refs: analysis.risk_score?.evidence_refs || [],
+          explanation: `Threat family: ${family || 'unknown'}. Risk signals: ${analysis.total_risk_signals || 0}.`,
+          all_results: []
+        });
+      }
+
+      // Auto-build graph after analysis
+      buildGraph(analysis);
+
+      // Auto-correlate against fixtures
+      correlate(analysis);
 
     } catch (err) {
       console.error('Analysis error:', err);
@@ -92,8 +126,56 @@ export default function AnalyzePage() {
     setClaimedBrand('');
     setNotes('');
     setAnalysisResult(null);
+    setGraphData(null);
+    setCorrelation(null);
+    setPatternResult(null);
+    setActiveTab('analysis');
     setError(null);
   };
+
+  const buildGraph = async (analysis) => {
+    if (!analysis) return;
+    setIsBuildingGraph(true);
+    try {
+      const res = await fetch(`${SERVER_URL_1}/api/threats/graph`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ analysis })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGraphData(data.graph);
+      }
+    } catch (e) {
+      console.error('Graph build error:', e);
+    } finally {
+      setIsBuildingGraph(false);
+    }
+  };
+
+  const correlate = async (analysis) => {
+    if (!analysis) return;
+    try {
+      const res = await fetch(`${SERVER_URL_1}/api/threats/correlate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: analysis })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCorrelation(data.correlation);
+      }
+    } catch (e) {
+      console.error('Correlation error:', e);
+    }
+  };
+
+  // Map threat family → T-pattern code
+  const FAMILY_TO_CODE = {
+    phishing: 'T1', malicious_url: 'T2', malicious_attachment: 'T3',
+    social_engineering_scam: 'T4', misinformation: 'T5', impersonation: 'T6'
+  };
+  const matchThreatFamilyToPatternCode = (f) => FAMILY_TO_CODE[f] || null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -232,8 +314,134 @@ export default function AnalyzePage() {
               )}
             </div>
 
-            {/* Analysis Results */}
+            {/* Results Tabs */}
             {analysisResult && (
+              <div className="flex gap-1 rounded-lg border border-border bg-card p-1">
+                {[
+                  { id: 'analysis', label: 'Analysis', icon: '◎' },
+                  { id: 'graph', label: `Graph${graphData ? ` (${graphData.metadata?.node_count || 0})` : ''}`, icon: '◈' },
+                  { id: 'pattern', label: 'Pattern', icon: '⚑' },
+                  { id: 'correlation', label: `Related${correlation?.total_correlated ? ` (${correlation.total_correlated})` : ''}`, icon: '⬡' },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      activeTab === tab.id
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {tab.icon} {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* ── Graph Tab ────────────────────────────────────── */}
+            {analysisResult && activeTab === 'graph' && (
+              <div className="space-y-4">
+                {isBuildingGraph ? (
+                  <div className="flex h-64 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground text-sm">
+                    Building threat graph…
+                  </div>
+                ) : (
+                  <ThreatGraphViewer graphData={graphData} height={520} />
+                )}
+                {graphData && (
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <p className="mb-2 text-sm font-semibold text-foreground">Graph Summary</p>
+                    <div className="grid grid-cols-3 gap-3 text-center text-sm">
+                      <div className="rounded-lg bg-muted p-2">
+                        <p className="font-bold text-foreground">{graphData.metadata?.node_count || 0}</p>
+                        <p className="text-xs text-muted-foreground">Nodes</p>
+                      </div>
+                      <div className="rounded-lg bg-muted p-2">
+                        <p className="font-bold text-foreground">{graphData.metadata?.edge_count || 0}</p>
+                        <p className="text-xs text-muted-foreground">Edges</p>
+                      </div>
+                      <div className="rounded-lg bg-muted p-2">
+                        <p className="font-bold text-foreground capitalize">{graphData.metadata?.threat_family?.replace(/_/g,' ') || '—'}</p>
+                        <p className="text-xs text-muted-foreground">Family</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Pattern Tab ──────────────────────────────────── */}
+            {analysisResult && activeTab === 'pattern' && (
+              <div className="space-y-4">
+                {patternResult ? (
+                  <PatternResult
+                    result={patternResult}
+                    onViewGraph={() => setActiveTab('graph')}
+                  />
+                ) : (
+                  <div className="rounded-xl border border-border bg-card p-6 text-center text-muted-foreground text-sm">
+                    No pattern classification available for this analysis.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Correlation Tab ──────────────────────────────── */}
+            {analysisResult && activeTab === 'correlation' && (
+              <div className="space-y-4">
+                {correlation?.campaign_hint && (
+                  <div className="rounded-xl border border-primary/40 bg-primary/5 p-5">
+                    <div className="mb-2 flex items-center gap-2">
+                      <GitMerge className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-bold text-primary">Campaign Detected</span>
+                    </div>
+                    <p className="text-base font-semibold text-foreground">{correlation.campaign_hint.campaign_label}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">{correlation.campaign_hint.description}</p>
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                      <span className="rounded bg-primary/10 px-2 py-0.5 text-primary">Pattern: {correlation.campaign_hint.inferred_pattern}</span>
+                      <span className="rounded bg-muted px-2 py-0.5 text-muted-foreground">Related: {correlation.campaign_hint.related_count}</span>
+                      <span className="rounded bg-muted px-2 py-0.5 text-muted-foreground">Confidence: {Math.round((correlation.campaign_hint.confidence || 0) * 100)}%</span>
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-border bg-card p-5">
+                  <h3 className="mb-3 text-sm font-semibold text-foreground">
+                    Related Incidents ({correlation?.total_correlated || 0})
+                  </h3>
+                  {!correlation?.matches?.length ? (
+                    <p className="text-sm text-muted-foreground">No correlated incidents found.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {correlation.matches.slice(0, 5).map((match, idx) => (
+                        <div key={idx} className="rounded-lg border border-border bg-background p-3">
+                          <div className="mb-1 flex items-center justify-between">
+                            <span className="font-mono text-xs text-muted-foreground">{match.artifact_id}</span>
+                            <span className={`text-sm font-bold ${
+                              match.correlation_score >= 0.5 ? 'text-destructive' :
+                              match.correlation_score >= 0.3 ? 'text-orange-500' : 'text-muted-foreground'
+                            }`}>
+                              {Math.round(match.correlation_score * 100)}% match
+                            </span>
+                          </div>
+                          <p className="text-xs text-foreground">{match.explanation}</p>
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {Object.keys(match.matching_dimensions).map(dim => (
+                              <span key={dim} className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                                {dim.replace(/_/g, ' ')}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Analysis Results */}
+            {analysisResult && activeTab === 'analysis' && (
               <div className="space-y-4">
                 {/* Risk Score Card */}
                 <div className="rounded-xl border border-border bg-card p-6">

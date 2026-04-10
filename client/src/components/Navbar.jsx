@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, LogOut, User, Shield, Search, AlertTriangle, FileText } from "lucide-react";
+import { ChevronDown, LogOut, User, Shield, Search, AlertTriangle, FileText, Network } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 
 const navLinks = ["How It Works", "Capabilities", "Demo", "About"];
@@ -12,6 +12,7 @@ const investigationModes = [
   { icon: Search, label: "Malicious URLs & Files", href: "/chat?mode=urls" },
   { icon: AlertTriangle, label: "Misinformation & Campaigns", href: "/chat?mode=campaigns" },
   { icon: FileText, label: "AML & Illicit Finance", href: "/chat?mode=aml" },
+  { icon: Network, label: "Threat Graph Investigation", href: "/graph" },
 ];
 
 const Navbar = () => {
@@ -110,6 +111,9 @@ const Navbar = () => {
           
           <a href="/analyze" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
             Analyze
+          </a>
+          <a href="/graph" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+            Graph
           </a>
           <a href="/chat" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
             Threat Investigator
@@ -247,6 +251,13 @@ const Navbar = () => {
             onClick={() => setMobileOpen(false)}
           >
             Analyze
+          </Link>
+          <Link
+            href="/graph"
+            className="text-sm text-muted-foreground"
+            onClick={() => setMobileOpen(false)}
+          >
+            Graph
           </Link>
           <Link
             href="/chat"
