@@ -1,14 +1,14 @@
 import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
-import { Brain, Radar, MessageCircle, TrendingUp, Map, GitBranch } from "lucide-react";
+import { Shield, Search, MessageCircle, AlertTriangle, Network, FileText } from "lucide-react";
 
 const features = [
-  { icon: Brain, title: "AI Future Simulator", description: "Run thousands of simulations on your career trajectory using advanced AI models." },
-  { icon: Radar, title: "Skill Gap Radar", description: "Identify missing skills and get personalized learning paths to close the gap." },
-  { icon: MessageCircle, title: "Future Self Chat", description: "Have a conversation with your AI-projected future self for guidance." },
-  { icon: TrendingUp, title: "Career Trend Dashboard", description: "Track emerging industries and roles with real-time labor market intelligence." },
-  { icon: Map, title: "Life GPS Roadmap", description: "Turn your goals into step-by-step actionable milestones with deadlines." },
-  { icon: GitBranch, title: "Decision Impact Analyzer", description: "See how each decision branches into different future outcomes." },
+  { icon: Shield, title: "Malicious Content Detection", description: "Identify phishing, malware, and harmful content across emails, SMS, and social platforms." },
+  { icon: Search, title: "IOC & Entity Extraction", description: "Automatically extract URLs, domains, emails, phone numbers, and threat indicators from any content." },
+  { icon: MessageCircle, title: "AI Threat Investigator", description: "Chat with an AI assistant trained in cyber threat analysis and financial crime investigation." },
+  { icon: AlertTriangle, title: "Real-time Threat Scoring", description: "Get explainable risk scores with breakdowns for content, infrastructure, and behavioral patterns." },
+  { icon: Network, title: "Campaign Correlation Graph", description: "Visualize threat networks and relationships between actors, infrastructure, and attack patterns." },
+  { icon: FileText, title: "AML & Financial Threats", description: "Detect money laundering patterns, illicit finance networks, and financial crime typologies." },
 ];
 
 const FeatureCard = ({ feature, index }) => {
@@ -39,10 +39,10 @@ const FeaturesSection = () => {
       <div className="container mx-auto px-6">
         <div className="text-center mb-16">
           <h2 className="font-heading text-3xl md:text-5xl font-bold text-foreground mb-4">
-            Your Future, <span className="text-gradient-primary">Engineered</span>
+            Digital Threat <span className="text-gradient-primary">Intelligence</span>
           </h2>
           <p className="font-body text-muted-foreground text-lg max-w-xl mx-auto">
-            Six powerful AI modules working together to map your trajectory.
+            Six powerful analysis modules working together to protect your digital ecosystem.
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

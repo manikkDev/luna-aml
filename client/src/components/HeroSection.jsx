@@ -2,9 +2,9 @@
 import { useEffect, useRef, useState } from "react";
 
 const STATS = [
-  { value: "810K+", label: "Entities Analyzed" },
-  { value: "28", label: "Typologies Detected" },
-  { value: "Multi-hop", label: "Graph Tracing" },
+  { value: "2.1M+", label: "Threats Analyzed" },
+  { value: "12", label: "Threat Families" },
+  { value: "Real-time", label: "IOC Tracking" },
 ];
 
 // ══════════════════════════════════════════════════════════════════
@@ -711,7 +711,7 @@ const HeroSection = () => {
                 marginBottom: 20,
               }}
             >
-              Follow the money.
+              Detect threats.
               <br />
               <em
                 style={{
@@ -720,9 +720,9 @@ const HeroSection = () => {
                   fontWeight: 400,
                 }}
               >
-                Unmask
+                Connect
               </em>
-              <span style={{ fontWeight: 900 }}> the network.</span>
+              <span style={{ fontWeight: 900 }}> the signals.</span>
             </h1>
 
             <p
@@ -735,9 +735,7 @@ const HeroSection = () => {
                 margin: "0 auto 32px",
               }}
             >
-              AML Shield maps fund flows across shell company networks to
-              surface laundering patterns that single‑transaction systems can't
-              see.
+              Luna Shield analyzes malicious content, phishing campaigns, and financial threats across digital platforms to surface attack patterns that traditional systems miss.
             </p>
 
             <div

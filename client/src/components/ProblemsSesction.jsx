@@ -1,9 +1,9 @@
 import useScrollReveal from "@/hooks/useScrollReveal";
 
 const txRows = [
-  { from: "Shell Co. A", to: "Shell Co. B", amount: "$2.4M" },
-  { from: "Shell Co. B", to: "Shell Co. C", amount: "$2.1M" },
-  { from: "Shell Co. C", to: "Shell Co. A", amount: "$2.3M" },
+  { from: "Malicious Domain", to: "Phishing Kit", amount: "High Risk" },
+  { from: "Phishing Kit", to: "Command Server", amount: "Critical" },
+  { from: "Command Server", to: "Data Exfil", amount: "Severe" },
 ];
 
 const ProblemSection = () => {
@@ -27,18 +27,15 @@ const ProblemSection = () => {
         {/* Left text */}
         <div>
           <span className="text-8xl font-mono text-primary text-bold mb-2">
-            THE PROBLEM
+            THE THREAT
           </span>
           <h2 className="mt-6 text-3xl md:text-[42px] leading-[1.15] text-foreground font-serif">
-            Every transaction looks clean.
+            Every attack looks isolated.
             <br />
-            <span className="font-bold">Until you see the pattern.</span>
+            <span className="font-bold">Until you connect the signals.</span>
           </h2>
           <p className="mt-6 text-[15px] leading-[1.8] text-muted-foreground max-w-md">
-            Modern money laundering routes funds through chains of
-            legitimate-looking shell companies — consulting fees, loan
-            repayments, service invoices. Each transfer appears routine in
-            isolation. Only the network reveals the truth.
+            Modern digital threats span multiple platforms — phishing emails, malicious URLs, fake social profiles, and financial scams. Each indicator appears harmless alone. Only the threat network reveals the campaign.
           </p>
           <a
             href="#how-it-works"
@@ -59,12 +56,12 @@ const ProblemSection = () => {
           }}
         >
           <div className="float-card animate-idle-float p-6 w-full max-w-sm" style={{ transform: "rotate(-2deg)" }}>
-            <span className="pill-badge mb-4">⚠ NETWORK FLAGGED</span>
+            <span className="pill-badge mb-4">⚠ CAMPAIGN DETECTED</span>
             <h3 className="mt-4 text-xl font-serif text-foreground">
-              Nexus Holdings Ltd
+              Phishing Campaign Alpha
             </h3>
             <p className="text-xs font-mono text-muted-foreground mt-1">
-              Circular fund flow detected
+              Multi-platform attack infrastructure
             </p>
             <p className="mt-4 text-4xl font-mono text-destructive font-semibold">
               94 <span className="text-lg text-muted-foreground font-normal">/ 100</span>
@@ -87,7 +84,7 @@ const ProblemSection = () => {
             </div>
 
             <div className="mt-4">
-              <span className="pill-badge-red">Circular flow · 3 hops</span>
+              <span className="pill-badge-red">Attack chain · 3 stages</span>
             </div>
           </div>
         </div>

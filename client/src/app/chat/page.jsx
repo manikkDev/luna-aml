@@ -1258,8 +1258,8 @@ export default function ChatPage() {
 
             {/* Left: back + logo */}
             <div className="flex items-center gap-3">
-              <Image src="/main-logo.png" alt="AML Shield logo" width={32} height={32} style={{ borderRadius: 8, border: "1px solid rgba(var(--accent-rgb),0.3)" }} />
-              <span className="hud-logo-text">AML Shield <span style={{ color: "var(--accent)" }}></span></span>
+              <Image src="/main-logo.png" alt="Luna Shield logo" width={32} height={32} style={{ borderRadius: 8, border: "1px solid rgba(var(--accent-rgb),0.3)" }} />
+              <span className="hud-logo-text">Luna Shield <span style={{ color: "var(--accent)" }}></span></span>
             </div>
 
             {/* Desktop center actions */}
@@ -1440,7 +1440,7 @@ export default function ChatPage() {
                       <div style={{ position: "relative", zIndex: 1 }}>
                         <div className="welcome-badge">
                           <span className="pulse-dot" style={{ display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "var(--accent)" }} />
-                          Neural console online
+                          Threat intelligence console online
                         </div>
 
                         <h2 className="welcome-greeting">
@@ -1450,11 +1450,11 @@ export default function ChatPage() {
                         </h2>
 
                         <p className="welcome-sub">
-                          A futuristic command center for market intelligence, compliance signals, and strategic synthesis.
+                          An advanced investigation platform for digital threats, malicious campaigns, and attack infrastructure analysis.
                         </p>
 
                         <div className="welcome-pills">
-                          {["Evidence-backed insights", "Live charts & visuals", "Multimodal research"].map((label) => (
+                          {["Threat detection & scoring", "Attack graph visualization", "Multi-source intelligence"].map((label) => (
                             <div key={label} className="welcome-pill">
                               <span className="welcome-pill-dot" />
                               {label}

@@ -2,15 +2,24 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, LogOut, User } from "lucide-react";
+import { ChevronDown, LogOut, User, Shield, Search, AlertTriangle, FileText } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 
-const navLinks = ["How It Works", "Features", "Demo", "About"];
+const navLinks = ["How It Works", "Capabilities", "Demo", "About"];
+
+const investigationModes = [
+  { icon: Shield, label: "Phishing & Impersonation", href: "/chat?mode=phishing" },
+  { icon: Search, label: "Malicious URLs & Files", href: "/chat?mode=urls" },
+  { icon: AlertTriangle, label: "Misinformation & Campaigns", href: "/chat?mode=campaigns" },
+  { icon: FileText, label: "AML & Illicit Finance", href: "/chat?mode=aml" },
+];
 
 const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [modulesOpen, setModulesOpen] = useState(false);
   const profileRef = useRef(null);
+  const modulesRef = useRef(null);
   const { user, isLoading, logout } = useAuth();
   const userAvatar = user?.profileImageUrl || user?.avatarUrl || null;
   const userName = user?.name || user?.username || user?.email || "Profile";
@@ -21,6 +30,9 @@ const Navbar = () => {
     const handleClickOutside = (event) => {
       if (profileRef.current && !profileRef.current.contains(event.target)) {
         setProfileOpen(false);
+      }
+      if (modulesRef.current && !modulesRef.current.contains(event.target)) {
+        setModulesOpen(false);
       }
     };
 
@@ -41,11 +53,11 @@ const Navbar = () => {
         <div className="flex items-center gap-2">
           <img
             src="/main-logo.png"
-            alt="AML Shield logo"
+            alt="Luna Shield logo"
             className="h-8 w-8 rounded-md"
           />
           <span className="font-serif text-lg text-foreground font-semibold tracking-tight">
-            AML Shield
+            Luna Shield
           </span>
         </div>
 
@@ -60,8 +72,44 @@ const Navbar = () => {
               {link}
             </a>
           ))}
+          
+          {/* Investigation Modes Dropdown */}
+          <div className="relative" ref={modulesRef}>
+            <button
+              type="button"
+              onClick={() => setModulesOpen((open) => !open)}
+              className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Investigation Modes
+              <ChevronDown
+                className={`h-3 w-3 transition-transform ${modulesOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+
+            {modulesOpen && (
+              <div className="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-2xl border border-border bg-background/95 shadow-lg backdrop-blur">
+                <div className="p-2">
+                  {investigationModes.map((mode, index) => {
+                    const Icon = mode.icon;
+                    return (
+                      <Link
+                        key={index}
+                        href={mode.href}
+                        className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
+                        onClick={() => setModulesOpen(false)}
+                      >
+                        <Icon className="h-4 w-4 text-primary" />
+                        <span>{mode.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+          
           <a href="/chat" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
-            Chat with our AI
+            Threat Investigator
           </a>
         </div>
 
@@ -166,12 +214,36 @@ const Navbar = () => {
               {link}
             </a>
           ))}
+          
+          {/* Mobile Investigation Modes */}
+          <div className="border-t border-border pt-4 mt-4">
+            <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
+              Investigation Modes
+            </p>
+            <div className="space-y-2">
+              {investigationModes.map((mode, index) => {
+                const Icon = mode.icon;
+                return (
+                  <Link
+                    key={index}
+                    href={mode.href}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    <Icon className="h-4 w-4 text-primary" />
+                    <span>{mode.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+          
           <Link
             href="/chat"
             className="text-sm text-muted-foreground"
             onClick={() => setMobileOpen(false)}
           >
-            Chat with our AI
+            Threat Investigator
           </Link>
           <a href="#demo" className="btn-primary !py-2 !px-5 text-sm text-center">
             View Demo
