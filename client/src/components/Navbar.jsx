@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, LogOut, User, Shield, Search, AlertTriangle, FileText, Network, Bell } from "lucide-react";
+import { ChevronDown, LogOut, User, Shield, Search, AlertTriangle, FileText, Network, Bell, Briefcase } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 
 const navLinks = ["How It Works", "Capabilities", "Demo", "About"];
@@ -118,6 +118,10 @@ const Navbar = () => {
           <a href="/alerts" className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
             <Bell className="h-3.5 w-3.5" />
             Alerts
+          </a>
+          <a href="/cases" className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
+            <Briefcase className="h-3.5 w-3.5" />
+            Cases
           </a>
           <a href="/chat" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
             Threat Investigator
@@ -270,6 +274,14 @@ const Navbar = () => {
           >
             <Bell className="h-3.5 w-3.5" />
             Alerts
+          </Link>
+          <Link
+            href="/cases"
+            className="flex items-center gap-2 text-sm text-muted-foreground"
+            onClick={() => setMobileOpen(false)}
+          >
+            <Briefcase className="h-3.5 w-3.5" />
+            Cases
           </Link>
           <Link
             href="/chat"

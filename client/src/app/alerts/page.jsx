@@ -41,7 +41,7 @@ function timeAgo(iso) {
 }
 
 // ─── Alert Card ───────────────────────────────────────────────────────────────
-function AlertCard({ alert, onStatusChange, onViewGraph }) {
+function AlertCard({ alert, onStatusChange, onViewGraph, onCreateCase }) {
   const [expanded, setExpanded] = useState(false);
   const sev = SEV[alert.severity] || SEV.medium;
 
@@ -152,7 +152,7 @@ function AlertCard({ alert, onStatusChange, onViewGraph }) {
           )}
 
           {/* Status actions */}
-          <div className="flex gap-2 pt-1">
+          <div className="flex flex-wrap gap-2 pt-1">
             {alert.status === 'open' && (
               <>
                 <button onClick={() => onStatusChange(alert.alert_id, 'investigating')}
@@ -177,6 +177,12 @@ function AlertCard({ alert, onStatusChange, onViewGraph }) {
                 Reopen
               </button>
             )}
+            <button
+              onClick={() => onCreateCase && onCreateCase(alert)}
+              className="rounded-lg border border-primary bg-primary/5 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
+            >
+              Create Case
+            </button>
           </div>
         </div>
       )}
@@ -394,6 +400,35 @@ export default function AlertsPage() {
     } catch (e) { console.error('status change error:', e); }
   };
 
+  const handleCreateCase = async (alert) => {
+    try {
+      const caseData = {
+        title: alert.title,
+        summary: alert.reasons?.join('\n') || '',
+        threat_family: alert.threat_family,
+        severity: alert.severity,
+        confidence: alert.confidence,
+        priority: alert.severity === 'critical' ? 'critical' : alert.severity === 'high' ? 'high' : 'medium',
+        linked_alert_ids: [alert.alert_id],
+        linked_artifact_ids: alert.artifact_id ? [alert.artifact_id] : [],
+        linked_pattern_ids: alert.pattern_id ? [alert.pattern_id] : [],
+        auto_recommend_actions: true,
+        created_by: 'alert_system',
+      };
+      
+      const res = await fetch(`${SERVER_URL_1}/api/cases`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(caseData),
+      });
+      
+      const data = await res.json();
+      if (data.case) {
+        window.location.href = `/cases/${data.case.case_id}`;
+      }
+    } catch (e) { console.error('create case error:', e); }
+  };
+
   const handleDeleteWatchlist = async (id) => {
     try {
       await fetch(`${SERVER_URL_1}/api/alerts/watchlist/${id}`, { method: 'DELETE' });
@@ -514,6 +549,7 @@ export default function AlertsPage() {
                     alert={alert}
                     onStatusChange={handleStatusChange}
                     onViewGraph={(id) => window.open(`/analyze?artifact_id=${id}`, '_blank')}
+                    onCreateCase={handleCreateCase}
                   />
                 ))}
               </div>

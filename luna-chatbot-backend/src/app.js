@@ -16,6 +16,8 @@ import proxyRouter from "./routers/proxyRouter.js";
 import medicineRouter from "./routers/medicineRouter.js";
 import threatRouter from "./routes/threatRoutes.js";
 import alertRouter from "./routes/alertRoutes.js";
+import caseRouter from "./routes/caseRoutes.js";
+import actionRouter from "./routes/actionRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -108,6 +110,8 @@ app.use("/api/proxy", proxyRouter);
 app.use("/api/medicine", medicineRouter); // Medicine information endpoints
 app.use("/api/threats", threatRouter); // Threat analysis endpoints
 app.use("/api/alerts", alertRouter);   // Alert and watchlist endpoints
+app.use("/api/cases", caseRouter);     // Case management endpoints
+app.use("/api/actions", actionRouter); // Mitigation action endpoints
 
 // Health check
 app.get("/", (req, res) => {

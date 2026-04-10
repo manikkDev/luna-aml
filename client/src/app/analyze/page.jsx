@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { Shield, Upload, Link as LinkIcon, FileText, Image as ImageIcon, Mail, MessageSquare, AlertTriangle, GitMerge, Network, MessageCircle } from 'lucide-react';
+import { Shield, Upload, Link as LinkIcon, FileText, Image as ImageIcon, Mail, MessageSquare, AlertTriangle, GitMerge, Network, MessageCircle, Briefcase } from 'lucide-react';
 import { SERVER_URL_1 } from '@/utils/commonHelper';
 import ThreatGraphViewer from '@/components/ThreatGraphViewer';
 import PatternResult from '@/components/PatternResult';
@@ -302,7 +302,7 @@ export default function AnalyzePage() {
               </div>
               
               {analysisResult && (
-                <div className="mt-3">
+                <div className="mt-3 space-y-2">
                   <button
                     onClick={() => {
                       const family = analysisResult.classification?.primary_family || 'unknown';
@@ -330,6 +330,34 @@ export default function AnalyzePage() {
                   >
                     <MessageCircle className="h-4 w-4" />
                     Discuss in Copilot
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const caseData = {
+                          title: `${analysisResult.classification?.primary_family?.replace(/_/g,' ') || 'Threat'} Investigation`,
+                          summary: `Risk score: ${analysisResult.risk_score?.overall_score || 0}/100. ${analysisResult.total_risk_signals || 0} risk signals detected.`,
+                          threat_family: analysisResult.classification?.primary_family || 'unknown',
+                          severity: analysisResult.risk_score?.severity || 'medium',
+                          confidence: (analysisResult.risk_score?.confidence || 0.5),
+                          priority: (analysisResult.risk_score?.overall_score || 0) >= 75 ? 'high' : 'medium',
+                          linked_artifact_ids: [analysisResult.artifact_id],
+                          auto_recommend_actions: true,
+                          created_by: 'analyst',
+                        };
+                        const res = await fetch(`${SERVER_URL_1}/api/cases`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify(caseData),
+                        });
+                        const data = await res.json();
+                        if (data.case) window.location.href = `/cases/${data.case.case_id}`;
+                      } catch(e) { console.error('create case error:', e); }
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
+                  >
+                    <Briefcase className="h-4 w-4" />
+                    Create Case
                   </button>
                 </div>
               )}
