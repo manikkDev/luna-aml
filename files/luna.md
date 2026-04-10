@@ -27,7 +27,7 @@ Luna is an AML-focused investigation product with three main technical pieces:
    - scores them against six trained graph models (P1 to P6)
    - returns the best-matching typology and per-pattern scores
 
-There is also a second Node server in `luna-aml-web/server`. That service is mostly a separate healthcare and appointments backend, but it also exposes the Neo4j graph APIs used by the AML frontend. This mixed codebase is an important source of confusion.
+
 
 ## 2. Repo Layout
 
