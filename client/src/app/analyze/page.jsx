@@ -79,7 +79,12 @@ const KEYFRAMES = `
 
 function extractScore(scoreObj) {
   if (typeof scoreObj === 'number') return Math.round(scoreObj);
-  if (typeof scoreObj === 'object' && scoreObj !== null) return Math.round(scoreObj.overall_score || scoreObj.fused_score || 0);
+  if (typeof scoreObj === 'object' && scoreObj !== null) {
+    // Try multiple possible score field names
+    const score = scoreObj.fused_score || scoreObj.overall_score || scoreObj.risk_score || 
+                  scoreObj.content_score || scoreObj.ml_score || scoreObj.heuristic_score || scoreObj.intel_score || 0;
+    return Math.round(typeof score === 'number' ? score : 0);
+  }
   return 0;
 }
 
@@ -195,10 +200,10 @@ function generateReport(analysis) {
   
   if (scoring) {
     report += '─── SCORING BREAKDOWN ────────────────────────────\n\n';
-    report += `  Heuristic Score: ${scoring.heuristic_score || 0} (Weight: 30%)\n`;
-    report += `  ML Model Score:  ${scoring.ml_score || 0} (Weight: 50%)\n`;
-    report += `  Intel Score:     ${scoring.intel_score || 0} (Weight: 20%)\n`;
-    report += `  Fused Score:     ${scoring.fused_score || rScore}\n\n`;
+    report += `  Heuristic Score: ${extractScore(scoring.heuristic_score)} (Weight: 30%)\n`;
+    report += `  ML Model Score:  ${extractScore(scoring.ml_score)} (Weight: 50%)\n`;
+    report += `  Intel Score:     ${extractScore(scoring.intel_score)} (Weight: 20%)\n`;
+    report += `  Fused Score:     ${extractScore(scoring.fused_score) || rScore}\n\n`;
   }
   if (ml?.all_probabilities) {
     report += '─── CLASS PROBABILITIES ──────────────────────────\n\n';
@@ -327,7 +332,7 @@ export default function AnalyzePage() {
   };
 
   const handleAnalyze = async () => {
-    if (!content.trim()) { setError('Please provide content to analyze'); return; }
+    if (!content || !content.trim()) { setError('Please provide content to analyze'); return; }
     setIsAnalyzing(true);
     setError(null);
     setAnalysisResult(null);
@@ -358,7 +363,12 @@ export default function AnalyzePage() {
       setAnalyzeStep(3);
       setAnalysisResult(analysis);
 
-      const rScore = extractScore(analysis.risk_score);
+      // Score extraction cascade across multiple possible endpoints mapping targets
+      const rScore = extractScore(analysis.scoring_breakdown) || extractScore(analysis.risk_score) || extractScore(analysis.ml_classification) || 0;
+
+      // Build graph immediately after analysis
+      buildGraph(analysis);
+      correlateAnalysis(analysis);
 
       if (analysis?.classification) {
         const family = analysis.classification.primary_family;
@@ -392,8 +402,6 @@ export default function AnalyzePage() {
       };
       saveHistory([historyItem, ...analysisHistory]);
 
-      buildGraph(analysis);
-      correlateAnalysis(analysis);
       showToast('Analysis complete', 'success');
     } catch (err) {
       setError(err.message);
@@ -404,13 +412,160 @@ export default function AnalyzePage() {
   };
 
   const buildGraph = async (analysis) => {
-    if (!analysis) return;
+    if (!analysis) {
+      console.warn('[buildGraph] No analysis provided');
+      return;
+    }
     setIsBuildingGraph(true);
+    console.log('[buildGraph] Building graph for analysis:', analysis.analysis_id);
+    
     try {
-      const res = await fetch(`${SERVER_URL_1}/api/threats/graph`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ analysis }) });
-      if (res.ok) { const data = await res.json(); if (data?.graph) setGraphData(data.graph); }
-    } catch (e) { /* ignore */ }
-    finally { setIsBuildingGraph(false); }
+      const res = await fetch(`${SERVER_URL_1}/api/threats/graph`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ analysis }) 
+      });
+      
+      console.log('[buildGraph] API response status:', res.status);
+      
+      if (res.ok) { 
+        const data = await res.json();
+        console.log('[buildGraph] API response data:', data);
+        
+        if (data?.graph && data.graph.nodes && data.graph.nodes.length > 0) {
+          console.log('[buildGraph] Setting graph data with', data.graph.nodes.length, 'nodes');
+          // Ensure risk_score is set in metadata if missing
+          if (data.graph.metadata && data.graph.metadata.risk_score === undefined) {
+            data.graph.metadata.risk_score = extractScore(analysis.scoring_breakdown) || extractScore(analysis.risk_score) || extractScore(analysis.ml_classification) || 0;
+          }
+          setGraphData(data.graph);
+        } else {
+          console.warn('[buildGraph] API returned empty graph, generating fallback');
+          const fallbackGraph = generateFallbackGraph(analysis);
+          setGraphData(fallbackGraph);
+        }
+      } else {
+        const errorText = await res.text();
+        console.error('[buildGraph] API error:', res.status, errorText);
+        // Generate fallback graph on API failure
+        const fallbackGraph = generateFallbackGraph(analysis);
+        setGraphData(fallbackGraph);
+      }
+    } catch (e) { 
+      console.error('[buildGraph] Exception:', e);
+      // Generate fallback graph on exception
+      const fallbackGraph = generateFallbackGraph(analysis);
+      setGraphData(fallbackGraph);
+    } finally { 
+      setIsBuildingGraph(false); 
+    }
+  };
+
+  // Fallback graph generator when API fails
+  const generateFallbackGraph = (analysis) => {
+    console.log('[generateFallbackGraph] Creating fallback graph from analysis');
+    const nodes = [];
+    const edges = [];
+    let nodeId = 0;
+
+    // Central artifact node
+    const artifactNode = {
+      id: `node_${nodeId++}`,
+      type: 'artifact',
+      label: 'Analyzed Content',
+      size: 16,
+      properties: {
+        severity: analysis.ml_classification?.severity || 'medium',
+        confidence: analysis.ml_classification?.confidence || 0.5,
+      }
+    };
+    nodes.push(artifactNode);
+
+    // Add classification node
+    if (analysis.ml_classification?.predicted_class) {
+      const classNode = {
+        id: `node_${nodeId++}`,
+        type: 'claim',
+        label: analysis.ml_classification.predicted_class.replace(/_/g, ' '),
+        size: 12,
+        properties: { confidence: analysis.ml_classification.confidence }
+      };
+      nodes.push(classNode);
+      edges.push({ source: artifactNode.id, target: classNode.id, type: 'CLAIMS_TO_BE' });
+    }
+
+    // Add IOC nodes from enrichment — handle both structures
+    const iocs = analysis.ioc_enrichment?.enriched || analysis.indicators || [];
+    iocs.slice(0, 10).forEach(ioc => {
+      // Support both {type, value} and {indicator_type, indicator/url/domain} structures
+      const iocType = ioc.type || ioc.indicator_type || 'unknown';
+      const iocValue = ioc.value || ioc.normalized_value || ioc.indicator || ioc.url || ioc.domain || '';
+      if (!iocValue) return; // skip empty
+      const nodeType = iocType === 'url' ? 'url' : iocType === 'domain' ? 'domain' : iocType === 'email' ? 'email' : iocType === 'wallet' ? 'wallet' : iocType === 'ip' ? 'ip' : iocType === 'phone' ? 'phone' : 'evidence';
+      const iocNode = {
+        id: `node_${nodeId++}`,
+        type: nodeType,
+        label: iocValue.substring(0, 35),
+        size: 10,
+        properties: { 
+          reputation: ioc.enrichment?.reputation || ioc.reputation || 'unknown',
+          source: ioc.enrichment?.source || ioc.source,
+          ioc_type: iocType,
+        }
+      };
+      nodes.push(iocNode);
+      edges.push({ source: artifactNode.id, target: iocNode.id, type: 'CONTAINS' });
+    });
+
+    // Add sender node from email if available
+    if (analysis.email?.from) {
+      const senderNode = {
+        id: `node_${nodeId++}`,
+        type: 'sender',
+        label: analysis.email.from.substring(0, 35),
+        size: 12,
+        properties: { role: 'sender' }
+      };
+      nodes.push(senderNode);
+      edges.push({ source: senderNode.id, target: artifactNode.id, type: 'SENT' });
+    }
+
+    // Add sender/recipient if available from entities
+    const entities = analysis.entities || [];
+    entities.slice(0, 5).forEach(entity => {
+      const entityNode = {
+        id: `node_${nodeId++}`,
+        type: entity.type === 'PERSON' ? 'person' : entity.type === 'ORG' ? 'organization' : 'evidence',
+        label: (entity.text || entity.value || '').substring(0, 25),
+        size: 10,
+        properties: { entity_type: entity.type }
+      };
+      nodes.push(entityNode);
+      edges.push({ source: artifactNode.id, target: entityNode.id, type: 'MENTIONS' });
+    });
+
+    // Risk score: prefer direct number, then extract from objects
+    const graphRiskScore = typeof analysis.risk_score === 'number'
+      ? analysis.risk_score
+      : typeof analysis.ml_classification?.risk_score === 'number'
+        ? analysis.ml_classification.risk_score
+        : extractScore(analysis.scoring_breakdown) || extractScore(analysis.risk_score) || extractScore(analysis.ml_classification) || 0;
+
+    const graph = {
+      nodes,
+      edges,
+      metadata: {
+        node_count: nodes.length,
+        edge_count: edges.length,
+        severity: analysis.ml_classification?.severity || 'medium',
+        threat_family: analysis.classification?.primary_family || analysis.ml_classification?.predicted_class,
+        risk_score: graphRiskScore,
+        generated_by: 'fallback'
+      }
+    };
+
+    console.log('[generateFallbackGraph] Generated graph:', graph);
+    return graph;
   };
 
   const correlateAnalysis = async (analysis) => {
@@ -488,32 +643,90 @@ export default function AnalyzePage() {
   };
 
   const loadHistoryItemToAnalyze = (item) => {
-    setAnalysisResult(item.analysis);
-    setContent(item.content);
-    const mode = INPUT_MODES.find(m => m.id === item.mode) || INPUT_MODES[4];
+    console.log('[loadHistoryItemToAnalyze] Loading item:', item);
+    
+    // History items have data at root level OR nested under 'analysis'
+    // Check which structure we have
+    const analysis = item.analysis || item;
+    const emailBody = item.email?.body || item.email?.bodyPreview || '';
+    
+    // Construct proper analysisResult structure
+    const mlClass = analysis.ml_classification;
+    const rScore = mlClass?.risk_score || extractScore(analysis.scoring_breakdown) || extractScore(analysis.risk_score) || 0;
+    
+    // Derive scoring_breakdown from ml_classification if missing
+    const scoringBreakdown = analysis.scoring_breakdown || (mlClass ? {
+      ml_score: Math.round(rScore * 0.5),
+      heuristic_score: Math.round(rScore * 0.3),
+      intel_score: Math.round(rScore * 0.2),
+      fused_score: rScore,
+    } : null);
+    
+    // Normalize indicators: handle both {type, value} and {indicator_type, indicator} field names
+    const rawIndicators = analysis.indicators || [];
+    const normalizedIndicators = rawIndicators.map(ind => ({
+      type: ind.type || ind.indicator_type || 'unknown',
+      value: ind.value || ind.indicator || ind.url || ind.domain || '',
+      normalized_value: ind.normalized_value || ind.value || ind.indicator || '',
+      enrichment: ind.enrichment || { reputation: ind.reputation || 'unknown', source: ind.source },
+    }));
+    
+    const analysisResult = {
+      ml_classification: mlClass,
+      scoring_breakdown: scoringBreakdown,
+      classification: analysis.classification,
+      risk_score: rScore,
+      ioc_enrichment: {
+        enriched: normalizedIndicators,
+        summary: analysis.indicator_summary || { total: normalizedIndicators.length, malicious: 0, suspicious: 0, clean: 0, unknown: normalizedIndicators.length }
+      },
+      entities: analysis.entities || [],
+      features: analysis.features || {},
+      analysis_id: analysis.id || item.id,
+      timestamp: analysis.analyzed_at || analysis.timestamp || item.timestamp,
+    };
+    
+    console.log('[loadHistoryItemToAnalyze] Constructed analysisResult:', analysisResult);
+    
+    // Set all the state
+    setAnalysisResult(analysisResult);
+    setContent(emailBody || item.content || '');
+    const mode = INPUT_MODES.find(m => m.id === (item.mode || 'email')) || INPUT_MODES[4];
     setSelectedMode(mode);
     setActiveView('analyze');
     setActiveTab('verdict');
     
+    // Clear previous state
+    setGraphData(null);
+    setCorrelation(null);
+    setPatternResult(null);
+    
     // Setup pattern result
-    if (item.analysis?.classification) {
-      const rScore = extractScore(item.analysis.risk_score);
-      const family = item.analysis.classification.primary_family;
+    if (analysis.classification || analysis.ml_classification) {
+      const mlClass = analysis.classification || analysis.ml_classification;
+      const rScore = extractScore(analysis.scoring_breakdown) || extractScore(analysis.risk_score) || extractScore(analysis.ml_classification) || 0;
+      const family = mlClass.primary_family || mlClass.predicted_class || 'unknown';
       const FAMILY_TO_CODE = { phishing: 'T1', malicious_url: 'T2', malicious_attachment: 'T3', social_engineering_scam: 'T4', misinformation: 'T5', impersonation: 'T6' };
       setPatternResult({
         pattern_code: FAMILY_TO_CODE[family] || 'T?',
         pattern_label: `${FAMILY_TO_CODE[family] || 'T?'} - ${family?.replace(/_/g, ' ') || 'Unknown'}`,
         family: 'digital_threat',
         risk_score: rScore / 100,
-        confidence: item.analysis.ml_classification?.confidence || 0.7,
-        severity: item.analysis.ml_classification?.severity || 'medium',
+        confidence: mlClass.confidence || 0.7,
+        severity: mlClass.severity || 'medium',
         decision: rScore >= 75 ? 'highly_suspicious' : 'likely_suspicious',
-        top_features: item.analysis.ml_classification?.top_features?.slice(0, 5) || [],
-        explanation: `Loaded from history. ML Model: ${item.analysis.ml_classification?.predicted_class || 'unknown'}.`,
+        top_features: mlClass.top_features?.slice(0, 5) || [],
+        explanation: `Loaded from history. ML Model: ${mlClass.predicted_class || 'unknown'}.`,
         all_results: [],
       });
     }
-    buildGraph(item.analysis);
+    
+    // Rebuild graph and correlation — merge email/raw data into analysisResult for graph
+    const analysisForGraph = { ...analysisResult, email: analysis.email, indicators: analysis.indicators };
+    console.log('[loadHistoryItemToAnalyze] Rebuilding graph and correlation');
+    buildGraph(analysisForGraph);
+    correlateAnalysis(analysisResult);
+    
     showToast('Analysis loaded into workbench', 'success');
   };
 
@@ -532,7 +745,12 @@ export default function AnalyzePage() {
   const ml = analysisResult?.ml_classification;
   const scoring = analysisResult?.scoring_breakdown;
   const iocSummary = analysisResult?.ioc_enrichment?.summary;
-  const currentRiskScore = extractScore(analysisResult?.risk_score);
+  const currentRiskScore = extractScore(analysisResult?.scoring_breakdown) || extractScore(analysisResult?.risk_score) || extractScore(analysisResult?.ml_classification) || 0;
+  
+  // Debug logging
+  if (analysisResult && !ml && !scoring) {
+    console.warn('[AnalyzePage] analysisResult exists but missing ml_classification and scoring_breakdown:', analysisResult);
+  }
 
   /* ═══════════════════════════════════════════════════════════════════════ */
 
@@ -663,10 +881,10 @@ export default function AnalyzePage() {
                     <span className="text-xs font-mono font-bold text-[var(--muted-foreground)] uppercase tracking-wider flex items-center gap-2">
                        <FileText size={14}/> Raw Payload Input
                     </span>
-                    <span className="text-[11px] font-mono text-[var(--primary)]">{content.length} bytes</span>
+                    <span className="text-[11px] font-mono text-[var(--primary)]">{(content || '').length} bytes</span>
                   </div>
                   <textarea
-                    value={content}
+                    value={content || ''}
                     onChange={(e) => setContent(e.target.value)}
                     placeholder={`Paste the ${selectedMode.desc?.toLowerCase()} payload here...\n\nExample: Raw email headers + body, or a suspicious SMS.`}
                     rows={10}
@@ -692,7 +910,7 @@ export default function AnalyzePage() {
                   </div>
                   <button
                     onClick={handleAnalyze}
-                    disabled={isAnalyzing || !content.trim()}
+                    disabled={isAnalyzing || !content || !content.trim()}
                     className="inline-flex items-center justify-center gap-3 px-8 py-3.5 rounded-xl text-base font-black uppercase tracking-wider transition-all disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--primary)] text-[var(--primary-foreground)] hover:shadow-[0_0_30px_rgba(52,178,123,0.4)] hover:-translate-y-0.5 active:translate-y-0 disabled:hover:shadow-none disabled:hover:translate-y-0"
                   >
                     <Scan size={20} /> Execute Analysis
@@ -854,20 +1072,23 @@ export default function AnalyzePage() {
                                 { label: 'Rules & Heuristics', score: scoring.heuristic_score, weight: '30%', icon: Activity, color: '#6aa9ff', desc: 'Syntax & pattern rules' },
                                 { label: 'AI Classification', score: scoring.ml_score, weight: '50%', icon: Brain, color: '#e54b4f', desc: 'Gradient boosting model' },
                                 { label: 'Threat Intel', score: scoring.intel_score, weight: '20%', icon: Shield, color: '#f59e0b', desc: 'Safe Browsing verification' },
-                              ].map(({ label, score: s, weight, icon: Icon, color, desc }, idx) => (
-                                <div key={label} className="p-6 rounded-2xl border border-white/10 bg-[#111614] relative overflow-hidden" style={{ animation: `slideInUp 0.4s ease ${idx * 0.1}s both` }}>
-                                  <div className="absolute top-0 left-0 bottom-0 w-1" style={{ background: color }} />
-                                  <div className="flex justify-between items-start mb-4">
-                                    <div className="flex items-center gap-3">
-                                      <div className="p-2 rounded-lg bg-white/5"><Icon size={18} style={{ color }} /></div>
+                              ].map(({ label, score: s, weight, icon: Icon, color, desc }, idx) => {
+                                const numScore = extractScore(s);
+                                return (
+                                  <div key={label} className="p-6 rounded-2xl border border-white/10 bg-[#111614] relative overflow-hidden" style={{ animation: `slideInUp 0.4s ease ${idx * 0.1}s both` }}>
+                                    <div className="absolute top-0 left-0 bottom-0 w-1" style={{ background: color }} />
+                                    <div className="flex justify-between items-start mb-4">
+                                      <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-lg bg-white/5"><Icon size={18} style={{ color }} /></div>
+                                      </div>
+                                      <span className="text-xs font-mono font-bold py-1 px-2.5 rounded-lg bg-white/5 border border-white/10 text-[var(--muted-foreground)]">Weight: {weight}</span>
                                     </div>
-                                    <span className="text-xs font-mono font-bold py-1 px-2.5 rounded-lg bg-white/5 border border-white/10 text-[var(--muted-foreground)]">Weight: {weight}</span>
+                                    <p className="text-sm font-bold text-[var(--foreground)] mb-1">{label}</p>
+                                    <p className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wider mb-4 font-mono">{desc}</p>
+                                    <p className="text-4xl font-black tabular-nums">{numScore}<span className="text-sm font-medium text-[var(--muted-foreground)]">/100</span></p>
                                   </div>
-                                  <p className="text-sm font-bold text-[var(--foreground)] mb-1">{label}</p>
-                                  <p className="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wider mb-4 font-mono">{desc}</p>
-                                  <p className="text-4xl font-black tabular-nums">{s || 0}<span className="text-sm font-medium text-[var(--muted-foreground)]">/100</span></p>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
 
@@ -883,7 +1104,17 @@ export default function AnalyzePage() {
                                     {Object.entries(features || {}).slice(0, 8).map(([k, v]) => (
                                       <div key={k} className="flex items-center justify-between border-b border-white/5 pb-2 last:border-0">
                                         <span className="text-xs font-mono text-[var(--muted-foreground)] truncate max-w-[200px]">{k}</span>
-                                        <span className="text-xs font-mono text-[var(--foreground)] font-bold">{typeof v === 'boolean' ? (v ? <span className="text-red-400">DETECTED</span> : <span className="text-green-400">CLEAN</span>) : v}</span>
+                                        <span className="text-xs font-mono text-[var(--foreground)] font-bold">
+                                          {typeof v === 'boolean' ? (
+                                            v ? <span className="text-red-400">DETECTED</span> : <span className="text-green-400">CLEAN</span>
+                                          ) : typeof v === 'number' ? (
+                                            v.toFixed(2)
+                                          ) : typeof v === 'object' && v !== null ? (
+                                            JSON.stringify(v).substring(0, 30)
+                                          ) : (
+                                            String(v || 'N/A')
+                                          )}
+                                        </span>
                                       </div>
                                     ))}
                                   </div>
@@ -897,7 +1128,26 @@ export default function AnalyzePage() {
                       {/* ── GRAPH, PATTERN, CORRELATION TABS ────────────── */}
                       {activeTab === 'graph' && (
                         <div className="rounded-2xl overflow-hidden border border-white/10" style={{ animation: 'fadeIn 0.4s ease' }}>
-                          {isBuildingGraph ? <div className="py-24 px-8"><SkeletonCard lines={6} /></div> : graphData ? <ThreatGraphViewer data={graphData} /> : <EmptyState icon={Network} title="No Graph Data" subtitle="Relational graph visualization will appear after structural analysis." />}
+                          {isBuildingGraph ? (
+                            <div className="py-24 px-8 text-center">
+                              <div className="w-16 h-16 border-4 border-[var(--primary)]/20 border-t-[var(--primary)] rounded-full animate-spin mx-auto mb-4" />
+                              <p className="text-sm text-[var(--muted-foreground)] font-medium">Building threat graph...</p>
+                            </div>
+                          ) : graphData && graphData.nodes && graphData.nodes.length > 0 ? (
+                            <ThreatGraphViewer graphData={graphData} />
+                          ) : analysisResult ? (
+                            <div className="py-24 px-8">
+                              <EmptyState icon={Network} title="Graph Construction Failed" subtitle="Unable to build entity relationship graph from current analysis data. The backend may not be running." />
+                              <button 
+                                onClick={() => buildGraph(analysisResult)}
+                                className="mt-4 px-4 py-2 rounded-xl bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity text-sm font-bold"
+                              >
+                                Retry Graph Build
+                              </button>
+                            </div>
+                          ) : (
+                            <EmptyState icon={Network} title="No Graph Data" subtitle="Relational graph visualization will appear after structural analysis." />
+                          )}
                         </div>
                       )}
                       
@@ -991,10 +1241,10 @@ export default function AnalyzePage() {
               <button
                 onClick={() => emailConnected ? setShowDisconnectModal(true) : setShowEmailModal(true)}
                 className={`inline-flex items-center gap-2.5 px-6 py-3 rounded-xl text-sm font-bold transition-all border ${
-                  emailMonitoring ? 'bg-red-500/10 border-red-500/30 text-red-500 hover:bg-red-500/20' : 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] hover:shadow-[0_0_30px_rgba(52,178,123,0.35)]'
+                  emailMonitoring ? 'bg-green-500/10 border-green-500/30 text-[var(--foreground)] hover:bg-green-500/20' : 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] hover:shadow-[0_0_30px_rgba(52,178,123,0.35)]'
                 }`}
               >
-                {emailMonitoring ? <><WifiOff size={18} /> Sever Connection</> : <><Wifi size={18} /> Establish Connection</>}
+                {emailMonitoring ? <><Wifi size={18} className="text-green-400" /> Active (Sever Connection)</> : <><Wifi size={18} /> Establish Connection</>}
               </button>
             </div>
 
@@ -1005,6 +1255,7 @@ export default function AnalyzePage() {
                 {liveFeed.map((item, i) => {
                   const isDel = deletingItems.includes(item.id);
                   const isSel = selectedFeedItem === i;
+                  const itemScore = extractScore(item.risk_score) || extractScore(item.ml_classification) || extractScore(item.scoring_breakdown) || 0;
                   return (
                     <div key={item.id}
                       className={`rounded-2xl border transition-all ${isDel ? 'slide-out' : ''} ${
@@ -1028,7 +1279,7 @@ export default function AnalyzePage() {
                         <div className="text-right flex-shrink-0 flex items-center gap-6">
                           <div className="text-right">
                             <p className="text-[10px] font-mono text-[var(--muted-foreground)] tracking-widest uppercase mb-1">Threat Index</p>
-                            <p className="text-2xl font-black tabular-nums">{item.risk_score || item.ml_classification?.risk_score || 0}<span className="text-xs text-[var(--muted-foreground)] font-medium">/100</span></p>
+                            <p className="text-2xl font-black tabular-nums">{itemScore}<span className="text-xs text-[var(--muted-foreground)] font-medium">/100</span></p>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-mono text-[var(--muted-foreground)] bg-white/5 px-2 py-1 rounded-lg flex items-center gap-1.5">
@@ -1082,7 +1333,7 @@ export default function AnalyzePage() {
                                       <span className="text-[10px] font-mono font-bold text-[var(--foreground)] bg-white/10 px-1.5 py-0.5 rounded">{f.value?.toFixed(2)}</span>
                                     </div>
                                   ))}
-                                  <button onClick={() => { setAnalysisResult(item.analysis); setActiveView('analyze'); }} className="w-full mt-4 py-2 text-xs font-bold text-[var(--primary)] bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 rounded-lg transition-colors border border-[var(--primary)]/20">
+                                  <button onClick={() => loadHistoryItemToAnalyze(item)} className="w-full mt-4 py-2 text-xs font-bold text-[var(--primary)] bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 rounded-lg transition-colors border border-[var(--primary)]/20">
                                     Load Full Forensic View
                                   </button>
                                 </div>
@@ -1136,6 +1387,7 @@ export default function AnalyzePage() {
               <div className="grid grid-cols-1 gap-3">
                 {filteredHistory.map((item, i) => {
                   const isDel = deletingItems.includes(item.id);
+                  const histScore = extractScore(item.risk_score) || extractScore(item.scoring_breakdown) || extractScore(item.ml_classification) || 0;
                   return (
                     <div key={item.id} className={`p-5 rounded-2xl border border-white/5 bg-[#111614] hover:border-[var(--primary)]/30 hover:bg-[#161c1a] transition-all group ${isDel ? 'slide-out' : ''}`}
                          style={!isDel ? { animation: `slideInUp 0.4s ease ${i * 0.03}s both` } : {}}>
@@ -1153,7 +1405,7 @@ export default function AnalyzePage() {
                         </div>
                         <div className="flex-shrink-0 text-center w-20">
                           <p className="text-[10px] font-mono uppercase tracking-widest text-[var(--muted-foreground)] mb-1">Index</p>
-                          <p className="text-xl font-black tabular-nums">{item.risk_score}<span className="text-xs font-medium text-[var(--muted-foreground)]">/100</span></p>
+                          <p className="text-xl font-black tabular-nums">{histScore}<span className="text-xs font-medium text-[var(--muted-foreground)]">/100</span></p>
                         </div>
                         <div className="flex items-center gap-2 pl-4">
                           <button onClick={() => loadHistoryItemToAnalyze(item)} className="p-2.5 rounded-xl bg-white/5 hover:bg-[var(--primary)] text-[var(--muted-foreground)] hover:text-black transition-all shadow-sm" title="Re-Analyze in Workbench">

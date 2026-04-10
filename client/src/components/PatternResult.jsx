@@ -105,7 +105,7 @@ function PatternRow({ entry, isHighlighted }) {
         <div className="mt-1.5 flex flex-wrap gap-1">
           {entry.top_features.slice(0, 3).map((f, i) => (
             <span key={i} className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-              {f}
+              {f?.feature || String(f)}
             </span>
           ))}
         </div>
@@ -257,7 +257,7 @@ export default function PatternResult({ result, title, compact = false, onViewGr
           <div className="flex flex-wrap gap-1.5">
             {topFeatures.map((f, i) => (
               <span key={i} className="rounded bg-muted px-2 py-0.5 text-xs text-foreground">
-                {f}
+                {f?.feature || String(f)}
               </span>
             ))}
           </div>

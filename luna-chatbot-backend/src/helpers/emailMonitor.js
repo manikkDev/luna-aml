@@ -194,6 +194,8 @@ class EmailMonitor extends EventEmitter {
    * Disconnect and stop monitoring
    */
   async disconnect() {
+    this.config = null; // Clear config to prevent auto-reconnect loops
+    
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
