@@ -14,6 +14,7 @@ import youtubeRouter from "./routers/youtubeRouter.js";
 import feedbackRouter from "./routers/feedbackRouter.js";
 import proxyRouter from "./routers/proxyRouter.js";
 import medicineRouter from "./routers/medicineRouter.js";
+import threatRouter from "./routes/threatRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -104,6 +105,7 @@ app.use("/api/chat", chatRouter); // Chat endpoints
 app.use("/api/feedback", feedbackRouter);
 app.use("/api/proxy", proxyRouter);
 app.use("/api/medicine", medicineRouter); // Medicine information endpoints
+app.use("/api/threats", threatRouter); // Threat analysis endpoints
 
 // Health check
 app.get("/", (req, res) => {

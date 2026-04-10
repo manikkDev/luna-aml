@@ -108,6 +108,9 @@ const Navbar = () => {
             )}
           </div>
           
+          <a href="/analyze" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+            Analyze
+          </a>
           <a href="/chat" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
             Threat Investigator
           </a>
@@ -238,6 +241,13 @@ const Navbar = () => {
             </div>
           </div>
           
+          <Link
+            href="/analyze"
+            className="text-sm text-muted-foreground"
+            onClick={() => setMobileOpen(false)}
+          >
+            Analyze
+          </Link>
           <Link
             href="/chat"
             className="text-sm text-muted-foreground"
