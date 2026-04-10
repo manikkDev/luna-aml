@@ -2,17 +2,39 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, LogOut, User, Shield, Search, AlertTriangle, FileText, Network, Bell, Briefcase } from "lucide-react";
+import { 
+  ChevronDown, LogOut, User, Shield, Search, AlertTriangle, 
+  FileText, Network, Bell, Briefcase, ScanLine, BarChart3, 
+  Target, MessageSquare, Menu, X, Sparkles
+} from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 
-const navLinks = ["How It Works", "Capabilities", "Demo", "About"];
+// Navigation sections - organized by workflow
+const DETECTION_TOOLS = [
+  { icon: ScanLine, label: "Threat Analysis", href: "/analyze", desc: "Analyze content & IOCs" },
+  { icon: Search, label: "URL Scanner", href: "/analyze?mode=url", desc: "Check suspicious URLs" },
+  { icon: Shield, label: "Phishing Detector", href: "/analyze?mode=phishing", desc: "Email & impersonation" },
+];
 
-const investigationModes = [
-  { icon: Shield, label: "Phishing & Impersonation", href: "/chat?mode=phishing" },
-  { icon: Search, label: "Malicious URLs & Files", href: "/chat?mode=urls" },
-  { icon: AlertTriangle, label: "Misinformation & Campaigns", href: "/chat?mode=campaigns" },
-  { icon: FileText, label: "AML & Illicit Finance", href: "/chat?mode=aml" },
-  { icon: Network, label: "Threat Graph Investigation", href: "/graph" },
+const INVESTIGATION_TOOLS = [
+  { icon: Network, label: "Threat Graph", href: "/graph", desc: "Visualize relationships" },
+  { icon: MessageSquare, label: "AI Copilot", href: "/chat", desc: "Investigator assistant" },
+  { icon: Target, label: "Campaign Tracker", href: "/chat?mode=campaigns", desc: "Cluster analysis" },
+  { icon: AlertTriangle, label: "Misinformation", href: "/chat?mode=misinfo", desc: "Coordinated content" },
+  { icon: FileText, label: "AML Patterns", href: "/chat?mode=aml", desc: "Financial crime (P1-P6)" },
+];
+
+const RESPONSE_TOOLS = [
+  { icon: Bell, label: "Alerts", href: "/alerts", badge: true },
+  { icon: Briefcase, label: "Cases", href: "/cases", badge: false },
+  { icon: BarChart3, label: "Dashboard", href: "/dashboard", badge: false },
+];
+
+// Landing page sections (anchor links)
+const LANDING_SECTIONS = [
+  { label: "Features", href: "#features" },
+  { label: "How It Works", href: "#how-it-works" },
+  { label: "Demo", href: "#demo" },
 ];
 
 const Navbar = () => {
@@ -43,145 +65,99 @@ const Navbar = () => {
 
   return (
     <nav
-      className="fixed top-0 left-0 right-0 z-50 border-b border-border"
+      className="fixed top-0 left-0 right-0 z-50 border-b border-border/50"
       style={{
-        backdropFilter: "blur(12px)",
-        background: "color-mix(in srgb, var(--background) 82%, transparent)",
+        backdropFilter: "blur(16px)",
+        background: "color-mix(in srgb, var(--background) 90%, transparent)",
       }}
     >
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 lg:px-8">
         {/* Logo */}
-        <div className="flex items-center gap-2">
-          <img
-            src="/main-logo.png"
-            alt="Luna Shield logo"
-            className="h-8 w-8 rounded-md"
-          />
-          <span className="font-serif text-lg text-foreground font-semibold tracking-tight">
-            Luna Shield
-          </span>
-        </div>
-
-        {/* Desktop Links */}
-        <div className="hidden md:flex items-center gap-8">
-          {navLinks.map((link) => (
-            <a
-              key={link}
-              href={`#${link.toLowerCase().replace(/\s/g, "-")}`}
-              className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {link}
-            </a>
-          ))}
-          
-          {/* Investigation Modes Dropdown */}
-          <div className="relative" ref={modulesRef}>
-            <button
-              type="button"
-              onClick={() => setModulesOpen((open) => !open)}
-              className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Investigation Modes
-              <ChevronDown
-                className={`h-3 w-3 transition-transform ${modulesOpen ? "rotate-180" : ""}`}
-              />
-            </button>
-
-            {modulesOpen && (
-              <div className="absolute right-0 top-full mt-2 w-64 overflow-hidden rounded-2xl border border-border bg-background/95 shadow-lg backdrop-blur">
-                <div className="p-2">
-                  {investigationModes.map((mode, index) => {
-                    const Icon = mode.icon;
-                    return (
-                      <Link
-                        key={index}
-                        href={mode.href}
-                        className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted"
-                        onClick={() => setModulesOpen(false)}
-                      >
-                        <Icon className="h-4 w-4 text-primary" />
-                        <span>{mode.label}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+        <Link href="/" className="flex items-center gap-2.5 group">
+          <div className="relative">
+            <img
+              src="/main-logo.png"
+              alt="Luna Shield"
+              className="h-9 w-9 rounded-lg transition-transform group-hover:scale-105"
+            />
+            <div className="absolute -bottom-1 -right-1 h-3 w-3 rounded-full bg-emerald-500 border-2 border-background" />
           </div>
+          <div className="flex flex-col">
+            <span className="text-lg font-bold tracking-tight text-foreground">
+              Luna Shield
+            </span>
+            <span className="text-[10px] text-muted-foreground -mt-1 hidden sm:block">
+              AI Threat Intelligence
+            </span>
+          </div>
+        </Link>
+
+        {/* Desktop Navigation */}
+        <div className="hidden lg:flex items-center gap-1">
+          {/* Detection Dropdown */}
+          <NavDropdown 
+            label="Detection" 
+            items={DETECTION_TOOLS}
+            icon={ScanLine}
+          />
           
-          <a href="/analyze" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
-            Analyze
-          </a>
-          <a href="/graph" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
-            Graph
-          </a>
-          <a href="/alerts" className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
-            <Bell className="h-3.5 w-3.5" />
-            Alerts
-          </a>
-          <a href="/cases" className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground">
-            <Briefcase className="h-3.5 w-3.5" />
-            Cases
-          </a>
-          <a href="/chat" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
-            Threat Investigator
-          </a>
+          {/* Investigation Dropdown */}
+          <NavDropdown 
+            label="Investigation" 
+            items={INVESTIGATION_TOOLS}
+            icon={Network}
+          />
+          
+          {/* Response Links */}
+          {RESPONSE_TOOLS.map((tool) => (
+            <NavLink key={tool.label} href={tool.href} icon={tool.icon} badge={tool.badge}>
+              {tool.label}
+            </NavLink>
+          ))}
         </div>
 
-        {/* CTA / Auth */}
-        <div className="hidden md:flex items-center gap-3">
-          <a
-            href="#demo"
-            className="btn-primary !py-2 !px-5 text-sm animate-glow-pulse"
+        {/* Right Side */}
+        <div className="flex items-center gap-2">
+          {/* Quick Demo Button - Desktop */}
+          <Link
+            href="/analyze"
+            className="hidden md:flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm"
           >
-            View Demo
-          </a>
+            <Sparkles className="h-4 w-4" />
+            Start Analysis
+          </Link>
 
+          {/* Auth */}
           {!isLoading && (
             user ? (
               <div className="relative" ref={profileRef}>
                 <button
-                  type="button"
-                  aria-label="Open profile menu"
-                  title={userName}
-                  onClick={() => setProfileOpen((open) => !open)}
-                  className="inline-flex h-10 items-center gap-2 rounded-full border border-border bg-muted/70 px-2 text-foreground transition-colors hover:bg-muted"
+                  onClick={() => setProfileOpen(!profileOpen)}
+                  className="flex h-10 items-center gap-2 rounded-full border border-border bg-muted/50 px-2 pl-3 hover:bg-muted transition-colors"
                 >
-                  <span className="inline-flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-muted">
+                  <span className="text-sm font-medium hidden sm:block">{userName.split(' ')[0]}</span>
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10">
                     {userAvatar ? (
-                      <img
-                        src={userAvatar}
-                        alt={userName}
-                        className="h-full w-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : userInitial ? (
-                      <span className="text-sm font-semibold">{userInitial}</span>
+                      <img src={userAvatar} alt="" className="h-full w-full rounded-full object-cover" />
                     ) : (
-                      <User className="h-4 w-4" />
+                      <span className="text-sm font-semibold text-primary">{userInitial}</span>
                     )}
                   </span>
-                  <ChevronDown
-                    className={`h-4 w-4 transition-transform ${profileOpen ? "rotate-180" : ""}`}
-                  />
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${profileOpen ? 'rotate-180' : ''}`} />
                 </button>
-
+                
                 {profileOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-56 overflow-hidden rounded-2xl border border-border bg-background/95 shadow-lg backdrop-blur">
+                  <div className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-border bg-background shadow-lg">
                     <div className="border-b border-border px-4 py-3">
-                      <p className="text-sm font-semibold text-foreground">{userName}</p>
-                      <p className="truncate text-xs text-muted-foreground">{userEmail}</p>
+                      <p className="text-sm font-semibold">{userName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
                     </div>
                     <button
-                      type="button"
-                      onClick={() => {
-                        setProfileOpen(false);
-                        logout();
-                      }}
-                      className="flex w-full items-center gap-2 px-4 py-3 text-sm text-foreground transition-colors hover:bg-muted"
+                      onClick={() => { setProfileOpen(false); logout(); }}
+                      className="flex w-full items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted transition-colors"
                     >
                       <LogOut className="h-4 w-4" />
-                      <span>Logout</span>
+                      Sign out
                     </button>
                   </div>
                 )}
@@ -189,157 +165,168 @@ const Navbar = () => {
             ) : (
               <Link
                 href="/login"
-                className="inline-flex items-center justify-center rounded-full border border-border px-5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                className="rounded-full border border-border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
               >
-                Login
+                Sign in
               </Link>
             )
           )}
-        </div>
 
-        {/* Mobile toggle */}
-        <button
-          className="md:hidden text-foreground"
-          onClick={() => setMobileOpen(!mobileOpen)}
-          aria-label="Toggle menu"
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            {mobileOpen ? (
-              <path d="M6 6l12 12M6 18L18 6" />
-            ) : (
-              <path d="M3 6h18M3 12h18M3 18h18" />
-            )}
-          </svg>
-        </button>
+          {/* Mobile Menu Toggle */}
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="lg:hidden flex h-10 w-10 items-center justify-center rounded-lg hover:bg-muted transition-colors"
+            aria-label="Toggle menu"
+          >
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
       </div>
 
-      {/* Mobile menu */}
+      {/* Mobile Menu */}
       {mobileOpen && (
-        <div
-          className="md:hidden border-t border-border px-6 py-4 flex flex-col gap-4"
-          style={{ background: "color-mix(in srgb, var(--background) 94%, transparent)" }}
-        >
-          {navLinks.map((link) => (
-            <a
-              key={link}
-              href={`#${link.toLowerCase().replace(/\s/g, "-")}`}
-              className="text-sm text-muted-foreground"
-              onClick={() => setMobileOpen(false)}
-            >
-              {link}
-            </a>
-          ))}
-          
-          {/* Mobile Investigation Modes */}
-          <div className="border-t border-border pt-4 mt-4">
-            <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
-              Investigation Modes
-            </p>
-            <div className="space-y-2">
-              {investigationModes.map((mode, index) => {
-                const Icon = mode.icon;
-                return (
-                  <Link
-                    key={index}
-                    href={mode.href}
-                    className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    onClick={() => setMobileOpen(false)}
-                  >
-                    <Icon className="h-4 w-4 text-primary" />
-                    <span>{mode.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-          
-          <Link
-            href="/analyze"
-            className="text-sm text-muted-foreground"
-            onClick={() => setMobileOpen(false)}
-          >
-            Analyze
-          </Link>
-          <Link
-            href="/graph"
-            className="text-sm text-muted-foreground"
-            onClick={() => setMobileOpen(false)}
-          >
-            Graph
-          </Link>
-          <Link
-            href="/alerts"
-            className="flex items-center gap-2 text-sm text-muted-foreground"
-            onClick={() => setMobileOpen(false)}
-          >
-            <Bell className="h-3.5 w-3.5" />
-            Alerts
-          </Link>
-          <Link
-            href="/cases"
-            className="flex items-center gap-2 text-sm text-muted-foreground"
-            onClick={() => setMobileOpen(false)}
-          >
-            <Briefcase className="h-3.5 w-3.5" />
-            Cases
-          </Link>
-          <Link
-            href="/chat"
-            className="text-sm text-muted-foreground"
-            onClick={() => setMobileOpen(false)}
-          >
-            Threat Investigator
-          </Link>
-          <a href="#demo" className="btn-primary !py-2 !px-5 text-sm text-center">
-            View Demo
-          </a>
-          {!isLoading && (
-            user ? (
-              <div className="rounded-2xl border border-border">
-                <div className="flex items-center gap-3 px-4 py-3">
-                  {userAvatar ? (
-                    <img
-                      src={userAvatar}
-                      alt={userName}
-                      className="h-8 w-8 rounded-full object-cover"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-sm font-semibold text-foreground">
-                      {userInitial || <User className="h-4 w-4" />}
-                    </span>
-                  )}
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-foreground">{userName}</p>
-                    <p className="truncate text-xs text-muted-foreground">{userEmail}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileOpen(false);
-                    logout();
-                  }}
-                  className="flex w-full items-center justify-center gap-2 border-t border-border px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                >
-                  <LogOut className="h-4 w-4" />
-                  <span>Logout</span>
-                </button>
-              </div>
-            ) : (
+        <div className="lg:hidden border-t border-border bg-background/95 backdrop-blur-xl">
+          <div className="mx-auto max-w-7xl px-4 py-4 space-y-4">
+            {/* Quick Actions */}
+            <div className="flex gap-2">
               <Link
-                href="/login"
-                className="rounded-full border border-border px-4 py-2 text-center text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                href="/analyze"
                 onClick={() => setMobileOpen(false)}
+                className="flex-1 flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground"
               >
-                Login
+                <ScanLine className="h-4 w-4" />
+                Analyze Threat
               </Link>
-            )
-          )}
+            </div>
+
+            {/* Detection Section */}
+            <MobileNavSection title="Detection">
+              {DETECTION_TOOLS.map((tool) => (
+                <MobileNavLink key={tool.label} href={tool.href} icon={tool.icon} onClick={() => setMobileOpen(false)}>
+                  <div>
+                    <p className="font-medium">{tool.label}</p>
+                    <p className="text-xs text-muted-foreground">{tool.desc}</p>
+                  </div>
+                </MobileNavLink>
+              ))}
+            </MobileNavSection>
+
+            {/* Investigation Section */}
+            <MobileNavSection title="Investigation">
+              {INVESTIGATION_TOOLS.map((tool) => (
+                <MobileNavLink key={tool.label} href={tool.href} icon={tool.icon} onClick={() => setMobileOpen(false)}>
+                  <div>
+                    <p className="font-medium">{tool.label}</p>
+                    <p className="text-xs text-muted-foreground">{tool.desc}</p>
+                  </div>
+                </MobileNavLink>
+              ))}
+            </MobileNavSection>
+
+            {/* Response Section */}
+            <MobileNavSection title="Response">
+              {RESPONSE_TOOLS.map((tool) => (
+                <MobileNavLink key={tool.label} href={tool.href} icon={tool.icon} onClick={() => setMobileOpen(false)}>
+                  {tool.label}
+                </MobileNavLink>
+              ))}
+            </MobileNavSection>
+          </div>
         </div>
       )}
     </nav>
   );
 };
+
+// Sub-components
+function NavDropdown({ label, items, icon: Icon }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+      >
+        <Icon className="h-4 w-4" />
+        {label}
+        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      
+      {open && (
+        <div className="absolute top-full left-0 mt-1 w-64 rounded-xl border border-border bg-background shadow-lg overflow-hidden">
+          <div className="p-1.5 space-y-0.5">
+            {items.map((item) => (
+              <Link
+                key={item.label}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                className="flex items-start gap-3 rounded-lg px-3 py-2.5 text-sm hover:bg-muted transition-colors"
+              >
+                <item.icon className="h-4 w-4 text-primary mt-0.5" />
+                <div>
+                  <p className="font-medium text-foreground">{item.label}</p>
+                  <p className="text-xs text-muted-foreground">{item.desc}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NavLink({ href, children, icon: Icon, badge }) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+    >
+      <Icon className="h-4 w-4" />
+      {children}
+      {badge && (
+        <span className="ml-1 flex h-2 w-2 rounded-full bg-destructive" />
+      )}
+    </Link>
+  );
+}
+
+function MobileNavSection({ title, children }) {
+  return (
+    <div className="border-t border-border pt-3">
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1">
+        {title}
+      </p>
+      <div className="space-y-1">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function MobileNavLink({ href, children, icon: Icon, onClick }) {
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm hover:bg-muted transition-colors"
+    >
+      <Icon className="h-4 w-4 text-primary" />
+      {children}
+    </Link>
+  );
+}
 
 export default Navbar;
