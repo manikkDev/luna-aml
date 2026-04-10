@@ -57,6 +57,15 @@ export const ENDPOINTS = {
   
   // ML Classification
   mlClassify: `${ML_API}/classify`,
+  mlThreatClassify: `${ML_API}/threat/classify`,
+  mlThreatHealth: `${ML_API}/threat/health`,
+  
+  // Email Monitoring
+  emailConnect: `${LUNA_API}/api/email/connect`,
+  emailDisconnect: `${LUNA_API}/api/email/disconnect`,
+  emailStatus: `${LUNA_API}/api/email/status`,
+  emailFeed: `${LUNA_API}/api/email/feed`,
+  emailHistory: `${LUNA_API}/api/email/history`,
 };
 
 // Export individual APIs for backward compatibility

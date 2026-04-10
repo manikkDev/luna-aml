@@ -34,6 +34,9 @@ import {
 import { ALL_FIXTURES, FIXTURE_BY_CODE } from '../data/digitalThreatFixtures.js';
 import { generateAlertsFromAnalysis } from '../helpers/alertEngine.js';
 import { recordThreatAnalyzed } from '../helpers/metricsStore.js';
+import { enrichIndicators } from '../helpers/threatIntelEnricher.js';
+
+const ML_SERVER_URL = process.env.ML_SERVER_URL || 'http://localhost:8000';
 
 const router = express.Router();
 
@@ -186,28 +189,67 @@ router.post('/analyze', async (req, res) => {
     
     const textToAnalyze = normalizedArtifact.extracted_text || normalizedArtifact.raw_content || '';
     
-    // Extract IOCs, entities, and claims
+    // ── LAYER 1: Heuristic extraction (existing) ──────────────────────────
     const indicators = extractAllIOCs(textToAnalyze);
     const entities = extractAllEntities(textToAnalyze, normalizedArtifact.metadata || {});
     const claims = extractAndClassifyClaims(textToAnalyze);
-    
-    // Compute enhanced threat score with classification
     const scoringResult = computeEnhancedThreatScore(textToAnalyze, indicators, entities, claims);
-    
-    // Analyze tone
     const toneAnalysis = analyzeContentTone(textToAnalyze);
-    
-    // Get claim summary
     const claimSummary = getClaimSummary(claims);
+    
+    // ── LAYER 2: ML Model Classification (NEW — parallel) ─────────────────
+    let mlClassification = null;
+    const mlPromise = (async () => {
+      try {
+        const mlResponse = await fetch(`${ML_SERVER_URL}/threat/classify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: textToAnalyze,
+            input_type: normalizedArtifact.input_type || 'raw_text',
+          }),
+          signal: AbortSignal.timeout(10000), // 10s timeout
+        });
+        if (mlResponse.ok) {
+          mlClassification = await mlResponse.json();
+        }
+      } catch (err) {
+        console.error('[ThreatAnalysis] ML server error:', err.message);
+      }
+    })();
+    
+    // ── LAYER 3: IOC Enrichment (NEW — parallel) ──────────────────────────
+    let iocEnrichment = { enriched: [], summary: { total: 0, malicious: 0, suspicious: 0, clean: 0, unknown: 0 } };
+    const enrichPromise = (async () => {
+      try {
+        iocEnrichment = await enrichIndicators(indicators);
+      } catch (err) {
+        console.error('[ThreatAnalysis] Enrichment error:', err.message);
+      }
+    })();
+    
+    // Wait for both ML and enrichment to complete
+    await Promise.all([mlPromise, enrichPromise]);
+    
+    // ── FUSION: Weighted risk scoring ──────────────────────────────────────
+    const heuristicScore = scoringResult.risk_score || 0;
+    const mlScore = mlClassification?.risk_score || 0;
+    const intelScore = iocEnrichment.summary.malicious > 0 ? 90 :
+                       iocEnrichment.summary.suspicious > 0 ? 50 : 10;
+    
+    // Weighted fusion: 30% heuristic + 50% ML + 20% intel
+    const fusedRiskScore = Math.round(
+      (heuristicScore * 0.3) + (mlScore * 0.5) + (intelScore * 0.2)
+    );
     
     // Build result
     const analysisResult = createThreatAnalysisResult(
       normalizedArtifact.artifact_id,
       normalizedArtifact,
       {
-        indicators,
+        indicators: iocEnrichment.enriched.length > 0 ? iocEnrichment.enriched : indicators,
         entities,
-        risk_score: scoringResult.risk_score,
+        risk_score: fusedRiskScore,
         evidence: scoringResult.evidence
       }
     );
@@ -219,6 +261,20 @@ router.post('/analyze', async (req, res) => {
     analysisResult.features = scoringResult.features;
     analysisResult.classification = scoringResult.classification;
     analysisResult.total_risk_signals = scoringResult.total_risk_signals;
+    
+    // ── NEW: ML Classification + Enrichment results ──────────────────────
+    analysisResult.ml_classification = mlClassification;
+    analysisResult.ioc_enrichment = iocEnrichment;
+    analysisResult.scoring_breakdown = {
+      heuristic_score: heuristicScore,
+      heuristic_weight: 0.3,
+      ml_score: mlScore,
+      ml_weight: 0.5,
+      intel_score: intelScore,
+      intel_weight: 0.2,
+      fused_score: fusedRiskScore,
+    };
+    analysisResult.risk_score = fusedRiskScore;
 
     // Auto-generate alerts (fire-and-forget, never block the response)
     const generatedAlerts = generateAlertsFromAnalysis(analysisResult);

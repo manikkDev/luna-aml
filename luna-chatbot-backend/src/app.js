@@ -19,6 +19,7 @@ import alertRouter from "./routes/alertRoutes.js";
 import caseRouter from "./routes/caseRoutes.js";
 import actionRouter from "./routes/actionRoutes.js";
 import metricsRouter from "./routes/metricsRoutes.js";
+import emailRouter from "./routes/emailRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -114,6 +115,7 @@ app.use("/api/alerts", alertRouter);   // Alert and watchlist endpoints
 app.use("/api/cases", caseRouter);     // Case management endpoints
 app.use("/api/actions", actionRouter); // Mitigation action endpoints
 app.use("/api/metrics", metricsRouter); // Platform metrics and analytics
+app.use("/api/email", emailRouter);     // Real-time email monitoring
 
 // Health check
 app.get("/", (req, res) => {
