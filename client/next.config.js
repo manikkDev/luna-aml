@@ -24,7 +24,9 @@ const nextConfig = {
     ];
   },
   // Enable React Strict Mode
-  reactStrictMode: true,
+  // NOTE: Disabled because React Strict Mode double-invokes effects in dev,
+  // which destroys SSE (EventSource) connections immediately on mount.
+  reactStrictMode: false,
   // Configure images if needed
   images: {
     domains: ['*'],

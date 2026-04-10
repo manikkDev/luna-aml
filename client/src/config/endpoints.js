@@ -66,6 +66,22 @@ export const ENDPOINTS = {
   emailStatus: `${LUNA_API}/api/email/status`,
   emailFeed: `${LUNA_API}/api/email/feed`,
   emailHistory: `${LUNA_API}/api/email/history`,
+  
+  // SMS Monitoring
+  smsWebhook: `${LUNA_API}/api/sms/webhook`,
+  smsConnect: `${LUNA_API}/api/sms/connect`,
+  smsDisconnect: `${LUNA_API}/api/sms/disconnect`,
+  smsStatus: `${LUNA_API}/api/sms/status`,
+  smsFeed: `${LUNA_API}/api/sms/feed`,
+  smsHistory: `${LUNA_API}/api/sms/history`,
+  
+  // Social Media Monitoring
+  socialWebhook: `${LUNA_API}/api/social/webhook`,
+  socialConnect: `${LUNA_API}/api/social/connect`,
+  socialDisconnect: `${LUNA_API}/api/social/disconnect`,
+  socialStatus: `${LUNA_API}/api/social/status`,
+  socialFeed: `${LUNA_API}/api/social/feed`,
+  socialHistory: `${LUNA_API}/api/social/history`,
 };
 
 // Export individual APIs for backward compatibility

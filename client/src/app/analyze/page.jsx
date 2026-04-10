@@ -30,7 +30,9 @@ const INPUT_MODES = [
 
 const SIDEBAR_ITEMS = [
   { id: 'analyze', label: 'Analyze Threat', icon: Scan, desc: 'Manual threat analysis' },
-  { id: 'monitor', label: 'Live Monitor', icon: Radio, desc: 'Real-time email feed' },
+  { id: 'monitor', label: 'Email Monitor', icon: Radio, desc: 'Real-time email feed' },
+  { id: 'smsMonitor', label: 'SMS Monitor', icon: Smartphone, desc: 'Real-time SMS feed' },
+  { id: 'socialMonitor', label: 'Social Monitor', icon: MessageSquare, desc: 'Real-time social feed' },
   { id: 'history', label: 'History & Logs', icon: History, desc: 'Past analyses' },
 ];
 
@@ -280,6 +282,26 @@ export default function AnalyzePage() {
   const [selectedFeedItem, setSelectedFeedItem] = useState(null);
   const eventSourceRef = useRef(null);
 
+  // SMS monitor state
+  const [smsActive, setSmsActive] = useState(false);
+  const [showSmsModal, setShowSmsModal] = useState(false);
+  const [showSmsDisconnectModal, setShowSmsDisconnectModal] = useState(false);
+  const [smsLiveFeed, setSmsLiveFeed] = useState([]);
+  const [selectedSmsFeedItem, setSelectedSmsFeedItem] = useState(null);
+  const smsEventSourceRef = useRef(null);
+
+  // Social media monitor state
+  const [socialActive, setSocialActive] = useState(false);
+  const [showSocialModal, setShowSocialModal] = useState(false);
+  const [showSocialDisconnectModal, setShowSocialDisconnectModal] = useState(false);
+  const [socialConsentGiven, setSocialConsentGiven] = useState(() => {
+    try { return localStorage.getItem('luna_social_consent') === 'true'; } catch { return false; }
+  });
+  const [socialLiveFeed, setSocialLiveFeed] = useState([]);
+  const [selectedSocialFeedItem, setSelectedSocialFeedItem] = useState(null);
+  const [socialShowSafe, setSocialShowSafe] = useState(false);
+  const socialEventSourceRef = useRef(null);
+
   // History state
   const [analysisHistory, setAnalysisHistory] = useState([]);
   const [historyFilter, setHistoryFilter] = useState('');
@@ -292,6 +314,11 @@ export default function AnalyzePage() {
 
   // SSE connection
   useEffect(() => {
+    fetch(ENDPOINTS.emailStatus || 'http://localhost:5001/api/email/status')
+      .then(r => r.json())
+      .then(s => { setEmailConnected(s.connected); setEmailMonitoring(s.monitoring); })
+      .catch(e => { /* ignore */ });
+
     const es = new EventSource(ENDPOINTS.emailFeed);
     eventSourceRef.current = es;
     es.onmessage = (e) => {
@@ -312,6 +339,128 @@ export default function AnalyzePage() {
     });
     return () => es.close();
   }, []);
+
+  // SMS SSE connection
+  useEffect(() => {
+    fetch(ENDPOINTS.smsStatus || 'http://localhost:5001/api/sms/status')
+      .then(r => r.json())
+      .then(s => { setSmsActive(s.active); })
+      .catch(e => { /* ignore */ });
+
+    const es = new EventSource(ENDPOINTS.smsFeed);
+    smsEventSourceRef.current = es;
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        setSmsLiveFeed(prev => [data, ...prev].slice(0, 100));
+      } catch (err) { /* ignore */ }
+    };
+    es.addEventListener('status', (e) => {
+      try {
+        const status = JSON.parse(e.data);
+        setSmsActive(status.active);
+      } catch (err) { /* ignore */ }
+    });
+    es.addEventListener('history', (e) => {
+      try { setSmsLiveFeed(JSON.parse(e.data).slice(0, 100)); } catch (err) { /* ignore */ }
+    });
+    return () => es.close();
+  }, []);
+
+  // Social Media: hybrid SSE + REST polling (guaranteed delivery)
+  useEffect(() => {
+    let es = null;
+    let retryTimer = null;
+    let pollInterval = null;
+    let active = true;
+
+    const SOCIAL_STATUS_URL = ENDPOINTS.socialStatus || 'http://localhost:5001/api/social/status';
+    const SOCIAL_HISTORY_URL = ENDPOINTS.socialHistory || 'http://localhost:5001/api/social/history';
+    const SOCIAL_FEED_URL = ENDPOINTS.socialFeed || 'http://localhost:5001/api/social/feed';
+
+    // REST poll — always works regardless of SSE state
+    function pollHistory() {
+      fetch(SOCIAL_HISTORY_URL)
+        .then(r => r.json())
+        .then(({ messages }) => {
+          if (!active || !Array.isArray(messages) || messages.length === 0) return;
+          setSocialLiveFeed(prev => {
+            // Merge: add any new messages not already in the feed
+            const ids = new Set(prev.map(m => m.id));
+            const newOnes = messages.filter(m => !ids.has(m.id));
+            if (newOnes.length === 0) return prev;
+            return [...newOnes, ...prev].slice(0, 150);
+          });
+        })
+        .catch(() => {});
+
+      fetch(SOCIAL_STATUS_URL)
+        .then(r => r.json())
+        .then(s => { if (active) setSocialActive(s.active); })
+        .catch(() => {});
+    }
+
+    // SSE — real-time layer on top of polling
+    function connectSSE() {
+      if (!active) return;
+      if (es) { try { es.close(); } catch { } es = null; }
+
+      es = new EventSource(SOCIAL_FEED_URL);
+      socialEventSourceRef.current = es;
+
+      es.onopen = () => { pollHistory(); }; // sync on connect
+
+      es.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data && data.id) {
+            setSocialLiveFeed(prev => {
+              if (prev.some(item => item.id === data.id)) return prev;
+              return [data, ...prev].slice(0, 150);
+            });
+          }
+        } catch { /* ignore */ }
+      };
+
+      es.addEventListener('status', (e) => {
+        try { const s = JSON.parse(e.data); if (active) setSocialActive(s.active); } catch { }
+      });
+
+      es.addEventListener('history', (e) => {
+        try {
+          const history = JSON.parse(e.data);
+          if (active && Array.isArray(history) && history.length > 0) {
+            setSocialLiveFeed(prev => {
+              const ids = new Set(prev.map(m => m.id));
+              const newOnes = history.filter(m => !ids.has(m.id));
+              if (newOnes.length === 0) return prev;
+              return [...newOnes, ...prev].slice(0, 150);
+            });
+          }
+        } catch { }
+      });
+
+      es.onerror = () => {
+        if (es) { try { es.close(); } catch { } es = null; }
+        if (active) {
+          retryTimer = setTimeout(connectSSE, 5000);
+        }
+      };
+    }
+
+    // Start: immediate poll + SSE + polling interval
+    pollHistory();
+    setTimeout(connectSSE, 200);
+    pollInterval = setInterval(pollHistory, 4000); // poll every 4 seconds
+
+    return () => {
+      active = false;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (pollInterval) clearInterval(pollInterval);
+      if (es) { try { es.close(); } catch { } es = null; }
+    };
+  }, []);
+
 
   // Load history from localStorage
   useEffect(() => {
@@ -609,6 +758,32 @@ export default function AnalyzePage() {
     } catch (err) { console.error(err); }
   };
 
+  /* ── SMS Connection Handlers ── */
+  const handleSmsConnect = async () => {
+    try {
+      const res = await fetch(ENDPOINTS.smsConnect, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const data = await res.json();
+      if (data.success) {
+        setSmsActive(true);
+        setShowSmsModal(false);
+        showToast('SMS Webhook server activated', 'success');
+      }
+    } catch (e) {
+      setError('Connection failed: ' + e.message);
+    }
+  };
+
+  const handleSmsDisconnect = async () => {
+    try {
+      await fetch(ENDPOINTS.smsDisconnect, { method: 'POST' });
+      setSmsActive(false);
+      setShowSmsDisconnectModal(false);
+      showToast('SMS Webhook Offline', 'info');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   /* ── Utility Handlers ── */
   const downloadReport = () => {
     if (!analysisResult) return;
@@ -639,6 +814,49 @@ export default function AnalyzePage() {
       setLiveFeed(prev => prev.filter(item => item.id !== id));
       setDeletingItems(prev => prev.filter(i => i !== id));
       showToast('Feed item removed', 'info');
+    }, 450);
+  };
+
+  const deleteSmsFeedItem = (id) => {
+    setDeletingItems(prev => [...prev, id]);
+    setTimeout(() => {
+      setSmsLiveFeed(prev => prev.filter(item => item.id !== id));
+      setDeletingItems(prev => prev.filter(i => i !== id));
+      showToast('SMS removed', 'info');
+    }, 450);
+  };
+
+  // Social Media handlers
+  const handleSocialConnect = async () => {
+    try {
+      await fetch(ENDPOINTS.socialConnect, { method: 'POST' });
+      setSocialActive(true);
+      setShowSocialModal(false);
+      localStorage.setItem('luna_social_consent', 'true');
+      setSocialConsentGiven(true);
+      showToast('Social media monitoring activated', 'success');
+    } catch (err) { showToast('Connection failed', 'error'); }
+  };
+
+  const handleSocialDisconnect = async () => {
+    try {
+      await fetch(ENDPOINTS.socialDisconnect, { method: 'POST' });
+      setSocialActive(false);
+      setShowSocialDisconnectModal(false);
+      showToast('Social media monitoring disconnected', 'info');
+    } catch (err) { console.error(err); }
+  };
+
+  const deleteSocialFeedItem = (id) => {
+    setDeletingItems(prev => [...prev, id]);
+    setTimeout(() => {
+      setSocialLiveFeed(prev => prev.filter(item => item.id !== id));
+      setDeletingItems(prev => prev.filter(i => i !== id));
+      showToast('Message removed', 'info');
+      // Tell backend to permanently delete it so it doesn't reappear on next poll
+      fetch(`${ENDPOINTS.socialHistory || 'http://localhost:5001/api/social/history'}/${id}`, {
+        method: 'DELETE'
+      }).catch(err => console.error('Failed to permanently delete item:', err));
     }, 450);
   };
 
@@ -774,15 +992,19 @@ export default function AnalyzePage() {
           {SIDEBAR_ITEMS.map(item => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
-            const isMonitor = item.id === 'monitor';
+            const isEmailMonitor = item.id === 'monitor';
+            const isSmsMonitor = item.id === 'smsMonitor';
+            const isSocialMonitor = item.id === 'socialMonitor';
+            const isMonitorActive = (isEmailMonitor && emailMonitoring) || (isSmsMonitor && smsActive) || (isSocialMonitor && socialActive);
+            
             return (
               <button key={item.id} onClick={() => setActiveView(item.id)}
                 className={`w-full flex items-center gap-3.5 px-4 py-3.5 rounded-xl text-[14px] transition-all group ${
                   isActive ? 'bg-[var(--primary)]/10 text-[var(--primary)]' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5'
                 }`}>
-                <Icon size={18} className={`${isMonitor && emailMonitoring ? 'animate-pulse text-green-400' : ''} ${isActive ? 'text-[var(--primary)]' : 'group-hover:text-[var(--foreground)]'} transition-colors`} />
+                <Icon size={18} className={`${isMonitorActive ? 'animate-pulse text-green-400' : ''} ${isActive ? 'text-[var(--primary)]' : 'group-hover:text-[var(--foreground)]'} transition-colors`} />
                 <span className="font-semibold">{item.label}</span>
-                {isMonitor && emailMonitoring && (
+                {isMonitorActive && (
                   <span className="ml-auto w-2.5 h-2.5 rounded-full bg-green-400" style={{ boxShadow: '0 0 10px #34b27b', animation: 'pulseRing 2s infinite' }} />
                 )}
                 {item.id === 'history' && analysisHistory.length > 0 && (
@@ -794,28 +1016,78 @@ export default function AnalyzePage() {
         </nav>
 
         {/* Sidebar Footer: Connection Status */}
-        <div className="p-4 border-t border-white/5 bg-[#0a0f0d]/50">
-          <p className="text-[10px] font-mono uppercase text-[var(--muted-foreground)] mb-2 px-1 tracking-widest">IMAP Ingestion</p>
-          <button
-            onClick={() => emailConnected ? setShowDisconnectModal(true) : setShowEmailModal(true)}
-            className={`w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold transition-all border ${
-              emailMonitoring
-                ? 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20'
-                : 'bg-white/5 border-white/10 text-[var(--muted-foreground)] hover:border-[var(--primary)]/40 hover:text-[var(--foreground)]'
-            }`}
-          >
-            {emailMonitoring ? (
-              <>
-                <div className="relative flex items-center justify-center">
-                  <Wifi size={16} />
-                  <span className="absolute w-full h-full rounded-full border border-green-400" style={{ animation: 'radarScan 2s linear infinite' }} />
-                </div>
-                <span>Live Active</span>
-              </>
-            ) : (
-              <><WifiOff size={16} /> <span>Connect Mailbox</span></>
-            )}
-          </button>
+        <div className="p-4 border-t border-white/5 bg-[#0a0f0d]/50 space-y-4">
+          <div>
+            <p className="text-[10px] font-mono uppercase text-[var(--muted-foreground)] mb-2 px-1 tracking-widest">IMAP Ingestion</p>
+            <button
+              onClick={() => emailConnected ? setShowDisconnectModal(true) : setShowEmailModal(true)}
+              className={`w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold transition-all border ${
+                emailMonitoring
+                  ? 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20'
+                  : 'bg-white/5 border-white/10 text-[var(--muted-foreground)] hover:border-[var(--primary)]/40 hover:text-[var(--foreground)]'
+              }`}
+            >
+              {emailMonitoring ? (
+                <>
+                  <div className="relative flex items-center justify-center">
+                    <Wifi size={16} />
+                    <span className="absolute w-full h-full rounded-full border border-green-400" style={{ animation: 'radarScan 2s linear infinite' }} />
+                  </div>
+                  <span>Live Active</span>
+                </>
+              ) : (
+                <><WifiOff size={16} /> <span>Connect Mailbox</span></>
+              )}
+            </button>
+          </div>
+
+          <div>
+            <p className="text-[10px] font-mono uppercase text-[var(--muted-foreground)] mb-2 px-1 tracking-widest">SMS Webhook</p>
+            <button
+              onClick={() => smsActive ? setShowSmsDisconnectModal(true) : setShowSmsModal(true)}
+              className={`w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold transition-all border ${
+                smsActive
+                  ? 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20'
+                  : 'bg-white/5 border-white/10 text-[var(--muted-foreground)] hover:border-[var(--primary)]/40 hover:text-[var(--foreground)]'
+              }`}
+            >
+              {smsActive ? (
+                <>
+                  <div className="relative flex items-center justify-center">
+                    <Smartphone size={16} />
+                    <span className="absolute w-full h-full rounded-full border border-green-400" style={{ animation: 'radarScan 2s linear infinite' }} />
+                  </div>
+                  <span>Gateway Active</span>
+                </>
+              ) : (
+                <><Smartphone size={16} /> <span>Start Gateway</span></>
+              )}
+            </button>
+          </div>
+
+          <div>
+            <p className="text-[10px] font-mono uppercase text-[var(--muted-foreground)] mb-2 px-1 tracking-widest">Social Gateway</p>
+            <button
+              onClick={() => socialActive ? setShowSocialDisconnectModal(true) : setShowSocialModal(true)}
+              className={`w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-sm font-bold transition-all border ${
+                socialActive
+                  ? 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20'
+                  : 'bg-white/5 border-white/10 text-[var(--muted-foreground)] hover:border-[var(--primary)]/40 hover:text-[var(--foreground)]'
+              }`}
+            >
+              {socialActive ? (
+                <>
+                  <div className="relative flex items-center justify-center">
+                    <MessageSquare size={16} />
+                    <span className="absolute w-full h-full rounded-full border border-green-400" style={{ animation: 'radarScan 2s linear infinite' }} />
+                  </div>
+                  <span>Live Active</span>
+                </>
+              ) : (
+                <><MessageSquare size={16} /> <span>Connect Socials</span></>
+              )}
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -1350,7 +1622,309 @@ export default function AnalyzePage() {
           </div>
         )}
 
-        {/* ══ HISTORY VIEW ════════════════════════════════════════════════ */}
+        
+        {/* ══ SMS MONITOR VIEW ════════════════════════════════════════════════ */}
+        {activeView === 'smsMonitor' && (
+          <div className="w-full max-w-[1200px] mx-auto px-10 py-8" style={{ animation: 'fadeIn 0.3s ease' }}>
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 pb-4 border-b border-white/5 gap-4">
+              <div>
+                <h1 className="text-3xl font-black text-[var(--foreground)] flex items-center gap-3">
+                  <Smartphone size={28} className="text-[var(--primary)]"/> 
+                  SMS Gateway Monitor
+                  {smsActive && <span className="w-3 h-3 rounded-full bg-green-400 inline-block mb-1" style={{ boxShadow: '0 0 16px #34b27b', animation: 'pulseRing 2s infinite' }} />}
+                </h1>
+                <p className="text-sm text-[var(--muted-foreground)] mt-2 font-medium">
+                  {smsActive ? `Android Webhook Gateway Active · Inspecting payload ${smsLiveFeed.length}` : 'Connect an Android device via Webhook to stream and analyze incoming SMS messages (Smishing) in real-time.'}
+                </p>
+              </div>
+              <button
+                onClick={() => smsActive ? setShowSmsDisconnectModal(true) : setShowSmsModal(true)}
+                className={`inline-flex items-center gap-2.5 px-6 py-3 rounded-xl text-sm font-bold transition-all border ${
+                  smsActive ? 'bg-green-500/10 border-green-500/30 text-[var(--foreground)] hover:bg-green-500/20' : 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] hover:shadow-[0_0_30px_rgba(52,178,123,0.35)]'
+                }`}
+              >
+                {smsActive ? <><Smartphone size={18} className="text-green-400" /> Active (Sever Connection)</> : <><Smartphone size={18} /> Establish Connection</>}
+              </button>
+            </div>
+
+            {!smsActive && smsLiveFeed.length === 0 ? (
+              <EmptyState icon={Smartphone} title="Gateway Offline" subtitle="Start the Android SMS Gateway listener. The AI engine will passively evaluate SMS texts for Smishing threats as they arrive." />
+            ) : (
+              <div className="space-y-4">
+                {smsLiveFeed.map((item, i) => {
+                  const isDel = deletingItems.includes(item.id);
+                  const isSel = selectedSmsFeedItem === i;
+                  const itemScore = extractScore(item.risk_score) || extractScore(item.ml_classification) || extractScore(item.scoring_breakdown) || 0;
+                  return (
+                    <div key={item.id}
+                      className={`rounded-2xl border transition-all ${isDel ? 'slide-out' : ''} ${
+                        isSel ? 'bg-[#111614] border-[var(--primary)]/40 shadow-[0_10px_40px_rgba(52,178,123,0.08)]' : 'bg-[#111614]/50 border-white/5 hover:border-white/20 hover:bg-[#111614]'
+                      }`}
+                      style={!isDel ? { animation: `slideInUp 0.4s ease ${i * 0.04}s both` } : {}}
+                    >
+                      {/* Condensed Header */}
+                      <div className="flex items-center gap-5 p-5 cursor-pointer" onClick={() => setSelectedSmsFeedItem(isSel ? null : i)}>
+                        <div className="flex-shrink-0">
+                          <SeverityBadge severity={item.ml_classification?.severity || 'medium'} large />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-base font-bold text-[var(--foreground)] truncate flex items-center gap-2">
+                            {item.sms?.text?.substring(0, 80) || 'NO CONTENT'}...
+                          </p>
+                          <p className="text-xs text-[var(--muted-foreground)] mt-1.5 font-mono truncate">
+                            FROM: <span className="text-[var(--foreground)]">{item.sms?.from || 'Unknown Sender'}</span>
+                          </p>
+                        </div>
+                        <div className="text-right flex-shrink-0 flex items-center gap-6">
+                          <div className="text-right">
+                            <p className="text-[10px] font-mono text-[var(--muted-foreground)] tracking-widest uppercase mb-1">Threat Index</p>
+                            <p className="text-2xl font-black tabular-nums">{itemScore}<span className="text-xs text-[var(--muted-foreground)] font-medium">/100</span></p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono text-[var(--muted-foreground)] bg-white/5 px-2 py-1 rounded-lg flex items-center gap-1.5">
+                              <Clock size={12}/> {new Date(item.timestamp).toLocaleTimeString()}
+                            </span>
+                            <button onClick={(e) => { e.stopPropagation(); deleteSmsFeedItem(item.id); }} className="p-2 rounded-lg hover:bg-red-500/10 text-[var(--muted-foreground)] hover:text-red-400 transition-colors" title="Purge Record">
+                              <Trash2 size={16} />
+                            </button>
+                            <ChevronDown size={20} className={`text-[var(--muted-foreground)] transition-transform duration-300 ${isSel ? 'rotate-180' : ''}`} />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Expanded Forensic Detail */}
+                      {isSel && (
+                        <div className="px-5 pb-5 pt-2 border-t border-white/5" style={{ animation: 'fadeIn 0.3s ease' }}>
+                          <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-6 mt-4">
+                            {/* Detailed Info */}
+                            <div className="space-y-5">
+                              <div className="flex gap-4">
+                                <div className="flex-1 bg-[#161c1a] p-4 rounded-xl border border-white/5">
+                                  <p className="text-[10px] font-mono text-[var(--muted-foreground)] uppercase mb-1">AI Verdict</p>
+                                  <p className="text-sm font-bold text-[var(--primary)] uppercase">{item.ml_classification?.predicted_class?.replace(/_/g, ' ') || 'Unknown'}</p>
+                                </div>
+                                <div className="flex-1 bg-[#161c1a] p-4 rounded-xl border border-white/5">
+                                  <p className="text-[10px] font-mono text-[var(--muted-foreground)] uppercase mb-1">Model Confidence</p>
+                                  <p className="text-sm font-bold font-mono text-[var(--foreground)]">{item.ml_classification?.confidence ? `${(item.ml_classification.confidence * 100).toFixed(2)}%` : 'N/A'}</p>
+                                </div>
+                                <div className="flex-1 bg-[#161c1a] p-4 rounded-xl border border-white/5">
+                                  <p className="text-[10px] font-mono text-[var(--muted-foreground)] uppercase mb-1">IOCs Discovered</p>
+                                  <p className="text-sm font-bold font-mono text-[var(--foreground)]">{item.indicator_summary?.total || 0}</p>
+                                </div>
+                              </div>
+
+                              <div>
+                                <p className="text-[11px] font-bold text-[var(--foreground)] uppercase mb-2 flex items-center gap-2"><Smartphone size={14} className="text-[var(--primary)]"/> Raw SMS Payload</p>
+                                <div className="p-4 rounded-xl bg-black/40 border border-white/5 max-h-[250px] overflow-y-auto custom-scrollbar">
+                                  <pre className="text-sm font-mono text-[var(--muted-foreground)] whitespace-pre-wrap leading-relaxed">{item.sms?.text || 'No readable body content extracted.'}</pre>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Evidence / Features */}
+                            <div className="space-y-4">
+                              <div className="bg-[#161c1a] p-4 rounded-xl border border-white/5">
+                                <p className="text-[11px] font-bold text-[var(--foreground)] uppercase mb-4 flex items-center gap-2"><Brain size={14} className="text-[var(--primary)]"/> Conviction Evidence</p>
+                                {item.conviction_reasons?.length > 0 ? (
+                                  <div className="space-y-3">
+                                    {item.conviction_reasons.slice(0, 3).map((r, idx) => (
+                                      <div key={idx} className="flex flex-col gap-1 text-xs">
+                                        <span className={`font-bold ${r.severity === 'critical' ? 'text-red-400' : r.severity === 'high' ? 'text-orange-400' : 'text-yellow-400'}`}>{r.category}</span>
+                                        <span className="text-[10px] text-[var(--muted-foreground)] leading-relaxed">{r.detail}</span>
+                                      </div>
+                                    ))}
+                                    <button onClick={() => loadHistoryItemToAnalyze(item)} className="w-full mt-4 py-2 text-xs font-bold text-[var(--primary)] bg-[var(--primary)]/10 hover:bg-[var(--primary)]/20 rounded-lg transition-colors border border-[var(--primary)]/20">
+                                      Load Full Forensic View
+                                    </button>
+                                  </div>
+                                ) : <p className="text-xs text-[var(--muted-foreground)]">No direct feature evidence attached to feed object.</p>}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+{/* ══ SOCIAL MONITOR VIEW ════════════════════════════════════════ */}
+        {activeView === 'socialMonitor' && (
+          <div className="w-full max-w-[1200px] mx-auto px-10 py-8" style={{ animation: 'fadeIn 0.3s ease' }}>
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 pb-4 border-b border-white/5 gap-4">
+              <div>
+                <h1 className="text-3xl font-black text-[var(--foreground)] flex items-center gap-3">
+                  <MessageSquare size={28} className="text-[var(--primary)]"/>
+                  Social Media Monitor
+                  {socialActive && <span className="w-3 h-3 rounded-full bg-green-400 inline-block mb-1" style={{ boxShadow: '0 0 16px #34b27b', animation: 'pulseRing 2s infinite' }} />}
+                </h1>
+                <p className="text-sm text-[var(--muted-foreground)] mt-2 font-medium">
+                  {socialActive ? `Notification Gateway Active · ${socialLiveFeed.filter(m => m.isThreat).length} threats detected / ${socialLiveFeed.length} total` : 'Connect your Android device via MacroDroid to intercept and analyze WhatsApp, Instagram & Telegram messages in real-time.'}
+                </p>
+              </div>
+              <button
+                onClick={() => socialActive ? setShowSocialDisconnectModal(true) : setShowSocialModal(true)}
+                className={`inline-flex items-center gap-2.5 px-6 py-3 rounded-xl text-sm font-bold transition-all border ${
+                  socialActive ? 'bg-green-500/10 border-green-500/30 text-[var(--foreground)] hover:bg-green-500/20' : 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] hover:shadow-[0_0_30px_rgba(52,178,123,0.35)]'
+                }`}
+              >
+                {socialActive ? <><MessageSquare size={18} className="text-green-400" /> Active (Sever Connection)</> : <><MessageSquare size={18} /> Establish Connection</>}
+              </button>
+            </div>
+
+            {!socialActive && socialLiveFeed.length === 0 ? (
+              <EmptyState icon={MessageSquare} title="Gateway Offline" subtitle="Connect the MacroDroid notification listener on your Android phone. Luna will passively intercept and classify messages from WhatsApp, Instagram, and Telegram." />
+            ) : (
+              <div className="space-y-6">
+                {/* ── THREAT FEED ── */}
+                {socialLiveFeed.filter(m => m.isThreat).length > 0 && (
+                  <div>
+                    <h2 className="text-sm font-black uppercase tracking-widest text-red-400 mb-4 flex items-center gap-2"><AlertTriangle size={16}/> Threat Alerts ({socialLiveFeed.filter(m => m.isThreat).length})</h2>
+                    <div className="space-y-3">
+                      {socialLiveFeed.filter(m => m.isThreat).map((item, i) => {
+                        const isDel = deletingItems.includes(item.id);
+                        const isSel = selectedSocialFeedItem === item.id;
+                        const itemScore = extractScore(item.risk_score) || extractScore(item.ml_classification) || extractScore(item.scoring_breakdown) || 0;
+                        return (
+                          <div key={item.id}
+                            className={`rounded-2xl border transition-all ${isDel ? 'slide-out' : ''} ${
+                              isSel ? 'bg-[#111614] border-red-500/40 shadow-[0_10px_40px_rgba(229,75,79,0.08)]' : 'bg-[#111614]/50 border-white/5 hover:border-red-500/20 hover:bg-[#111614]'
+                            }`}
+                            style={!isDel ? { animation: `slideInUp 0.4s ease ${i * 0.04}s both` } : {}}
+                          >
+                            <div className="flex items-center gap-5 p-5 cursor-pointer" onClick={() => setSelectedSocialFeedItem(isSel ? null : item.id)}>
+                              <div className="flex-shrink-0 w-11 h-11 rounded-xl flex items-center justify-center border" style={{ background: `${item.social?.platformColor || '#888'}15`, borderColor: `${item.social?.platformColor || '#888'}40` }}>
+                                <span className="text-lg font-black" style={{ color: item.social?.platformColor || '#888' }}>
+                                  {item.social?.platformLabel?.charAt(0) || '?'}
+                                </span>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider" style={{ background: `${item.social?.platformColor || '#888'}20`, color: item.social?.platformColor || '#888' }}>{item.social?.platformLabel || 'Unknown'}</span>
+                                  <span className="text-[10px] font-mono text-[var(--muted-foreground)]">{item.social?.sender}</span>
+                                </div>
+                                <p className="text-sm font-bold text-[var(--foreground)] truncate">{item.social?.text?.substring(0, 100) || 'NO CONTENT'}</p>
+                              </div>
+                              <div className="text-right flex-shrink-0 flex items-center gap-4">
+                                <div className="text-right">
+                                  <p className="text-[10px] font-mono text-[var(--muted-foreground)] tracking-widest uppercase mb-1">Threat</p>
+                                  <p className="text-xl font-black tabular-nums text-red-400">{itemScore}<span className="text-xs text-[var(--muted-foreground)] font-medium">/100</span></p>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] font-mono text-[var(--muted-foreground)] bg-white/5 px-2 py-1 rounded-lg"><Clock size={10} className="inline mr-1"/> {new Date(item.timestamp).toLocaleTimeString()}</span>
+                                  <button onClick={(e) => { e.stopPropagation(); deleteSocialFeedItem(item.id); }} className="p-1.5 rounded-lg hover:bg-red-500/10 text-[var(--muted-foreground)] hover:text-red-400 transition-colors"><Trash2 size={14} /></button>
+                                  <ChevronDown size={18} className={`text-[var(--muted-foreground)] transition-transform duration-300 ${isSel ? 'rotate-180' : ''}`} />
+                                </div>
+                              </div>
+                            </div>
+
+                            {isSel && (
+                              <div className="px-5 pb-5 pt-2 border-t border-white/5" style={{ animation: 'fadeIn 0.3s ease' }}>
+                                <div className="grid grid-cols-1 md:grid-cols-[1fr_300px] gap-6 mt-4">
+                                  <div className="space-y-5">
+                                    <div className="flex gap-4">
+                                      <div className="flex-1 bg-[#161c1a] p-4 rounded-xl border border-white/5">
+                                        <p className="text-[10px] font-mono text-[var(--muted-foreground)] uppercase mb-1">AI Verdict</p>
+                                        <p className="text-sm font-bold text-red-400 uppercase">{item.ml_classification?.predicted_class?.replace(/_/g, ' ') || 'Unknown'}</p>
+                                      </div>
+                                      <div className="flex-1 bg-[#161c1a] p-4 rounded-xl border border-white/5">
+                                        <p className="text-[10px] font-mono text-[var(--muted-foreground)] uppercase mb-1">Confidence</p>
+                                        <p className="text-sm font-bold font-mono text-[var(--foreground)]">{item.ml_classification?.confidence ? `${(item.ml_classification.confidence * 100).toFixed(1)}%` : 'N/A'}</p>
+                                      </div>
+                                      <div className="flex-1 bg-[#161c1a] p-4 rounded-xl border border-white/5">
+                                        <p className="text-[10px] font-mono text-[var(--muted-foreground)] uppercase mb-1">Platform</p>
+                                        <p className="text-sm font-bold" style={{ color: item.social?.platformColor }}>{item.social?.platformLabel}</p>
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <p className="text-[11px] font-bold text-[var(--foreground)] uppercase mb-2 flex items-center gap-2"><MessageSquare size={14} className="text-[var(--primary)]"/> Full Message</p>
+                                      <div className="p-4 rounded-xl bg-black/40 border border-white/5 max-h-[250px] overflow-y-auto custom-scrollbar">
+                                        <pre className="text-sm font-mono text-[var(--muted-foreground)] whitespace-pre-wrap leading-relaxed">{item.social?.text || 'No content.'}</pre>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="space-y-4">
+                                    <div className="bg-[#161c1a] p-4 rounded-xl border border-white/5">
+                                      <p className="text-[11px] font-bold text-[var(--foreground)] uppercase mb-4 flex items-center gap-2"><Brain size={14} className="text-red-400"/> Conviction Evidence</p>
+                                      {item.conviction_reasons?.length > 0 ? (
+                                        <div className="space-y-3">
+                                          {item.conviction_reasons.filter(r => r.severity !== 'info').slice(0, 4).map((r, idx) => (
+                                            <div key={idx} className="flex flex-col gap-1 text-xs">
+                                              <span className={`font-bold ${r.severity === 'critical' ? 'text-red-400' : r.severity === 'high' ? 'text-orange-400' : 'text-yellow-400'}`}>{r.category}</span>
+                                              <span className="text-[10px] text-[var(--muted-foreground)] leading-relaxed">{r.detail}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : <p className="text-xs text-[var(--muted-foreground)]">No conviction evidence attached.</p>}
+                                    </div>
+                                    {item.scoring_breakdown && (
+                                      <div className="bg-[#161c1a] p-4 rounded-xl border border-white/5">
+                                        <p className="text-[11px] font-bold text-[var(--foreground)] uppercase mb-3">Score Breakdown</p>
+                                        {['ml_score', 'heuristic_score', 'intel_score'].map(k => (
+                                          <div key={k} className="flex justify-between text-[11px] mb-2">
+                                            <span className="text-[var(--muted-foreground)] capitalize">{k.replace(/_/g, ' ')}</span>
+                                            <span className="font-mono font-bold text-[var(--foreground)]">{item.scoring_breakdown[k] || 0}</span>
+                                          </div>
+                                        ))}
+                                        <div className="mt-2 pt-2 border-t border-white/5 flex justify-between text-xs">
+                                          <span className="text-[var(--muted-foreground)] font-bold">Fused Score</span>
+                                          <span className="font-mono font-black text-red-400">{item.scoring_breakdown.fused_score || itemScore}/100</span>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── SAFE MESSAGES (collapsed by default) ── */}
+                {socialLiveFeed.filter(m => !m.isThreat).length > 0 && (
+                  <div>
+                    <button onClick={() => setSocialShowSafe(!socialShowSafe)} className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-[#111614] border border-white/5 hover:border-white/10 transition-all mb-3">
+                      <span className="text-sm font-bold text-[var(--foreground)] flex items-center gap-2">
+                        <ShieldCheck size={16} className="text-green-400"/>
+                        Safe Messages ({socialLiveFeed.filter(m => !m.isThreat).length})
+                      </span>
+                      <ChevronDown size={18} className={`text-[var(--muted-foreground)] transition-transform duration-300 ${socialShowSafe ? 'rotate-180' : ''}`} />
+                    </button>
+                    {socialShowSafe && (
+                      <div className="space-y-2" style={{ animation: 'fadeIn 0.3s ease' }}>
+                        {socialLiveFeed.filter(m => !m.isThreat).slice(0, 30).map((item, i) => (
+                          <div key={item.id} className="flex items-center gap-4 p-3 rounded-xl bg-[#111614]/30 border border-white/3 hover:bg-[#111614]/60 transition-all group" style={{ animation: `slideInUp 0.3s ease ${i * 0.02}s both` }}>
+                            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: `${item.social?.platformColor || '#888'}10` }}>
+                              <span className="text-xs font-black" style={{ color: item.social?.platformColor || '#888' }}>{item.social?.platformLabel?.charAt(0) || '?'}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-[var(--muted-foreground)] truncate"><span className="font-bold text-[var(--foreground)]">{item.social?.sender}</span> via {item.social?.platformLabel}</p>
+                              <p className="text-[11px] text-[var(--muted-foreground)] truncate mt-0.5">{item.social?.text?.substring(0, 80)}</p>
+                            </div>
+                            <span className="text-[10px] font-mono text-green-400/60 bg-green-400/5 px-2 py-1 rounded flex-shrink-0">SAFE</span>
+                            <button onClick={() => deleteSocialFeedItem(item.id)} className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/10 text-[var(--muted-foreground)] hover:text-red-400 transition-all"><Trash2 size={12} /></button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {socialLiveFeed.length === 0 && socialActive && (
+                  <EmptyState icon={MessageSquare} title="Listening..." subtitle="The notification gateway is active. Messages from WhatsApp and Instagram will appear here as they arrive." />
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+{/* ══ HISTORY VIEW ════════════════════════════════════════════════ */}
         {activeView === 'history' && (
           <div className="w-full max-w-[1200px] mx-auto px-10 py-8" style={{ animation: 'fadeIn 0.3s ease' }}>
             <div className="flex items-center justify-between mb-8 pb-4 border-b border-white/5">
@@ -1496,7 +2070,163 @@ export default function AnalyzePage() {
         </div>
       )}
 
-      {/* Analysis Loading Overlay */}
+      
+      {/* SMS Disconnect Confirmation Modal */}
+      {showSmsDisconnectModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-md" style={{ animation: 'fadeIn 0.2s ease' }}>
+          <div className="w-full max-w-sm mx-4 bg-[#111614] rounded-3xl border border-white/10 shadow-2xl p-6 text-center" style={{ animation: 'scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
+            <div className="w-16 h-16 rounded-2xl bg-red-500/10 text-red-500 mx-auto flex items-center justify-center mb-4">
+              <Smartphone size={28} />
+            </div>
+            <h2 className="text-xl font-bold text-[var(--foreground)] mb-2">Disable Gateway?</h2>
+            <p className="text-sm text-[var(--muted-foreground)] mb-8">This will immediately reject HTTP webhooks from the Android SMS Gateway. Incoming messages will not be analyzed.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowSmsDisconnectModal(false)} className="flex-1 py-3 rounded-xl text-sm font-bold border border-white/10 bg-white/5 hover:bg-white/10 text-[var(--foreground)] transition-all">Cancel</button>
+              <button onClick={handleSmsDisconnect} className="flex-1 py-3 rounded-xl text-sm font-bold bg-red-500 text-white hover:bg-red-600 shadow-[0_0_20px_rgba(239,68,68,0.3)] transition-all">Sever Status</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SMS Connect Modal */}
+      {showSmsModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md" style={{ animation: 'fadeIn 0.2s ease' }}>
+          <div className="w-full max-w-lg mx-4 rounded-3xl border border-[var(--primary)]/20 bg-[#0a0f0d] shadow-2xl overflow-hidden" style={{ animation: 'scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
+            <div className="px-8 py-6 border-b border-white/5 bg-[var(--primary)]/5 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-[var(--primary)]/10 flex items-center justify-center border border-[var(--primary)]/20"><Smartphone size={24} className="text-[var(--primary)]" /></div>
+                <div>
+                  <h2 className="text-lg font-black text-[var(--foreground)]">Wire Android SMS Gateway</h2>
+                  <p className="text-xs text-[var(--primary)] font-mono uppercase tracking-widest mt-0.5">Webhook Ingestion Port</p>
+                </div>
+              </div>
+              <button onClick={() => setShowSmsModal(false)} className="p-2 rounded-xl hover:bg-white/10 text-[var(--muted-foreground)] hover:text-white transition-colors"><X size={20} /></button>
+            </div>
+
+            <div className="p-8 space-y-5 bg-[#111614]">
+              <div className="bg-white/5 border border-[var(--primary)]/20 p-4 rounded-xl flex items-start gap-4">
+                <Brain size={24} className="text-[var(--primary)] mt-1 flex-shrink-0" />
+                <div>
+                  <p className="text-[13px] text-[var(--foreground)] font-bold mb-1">Local ML Smishing Classification</p>
+                  <p className="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
+                    SMS messages forwarded to this gateway are processed by an offline Gradient Boosting Machine Learning model trained on 3,000+ Smishing and benign text samples. It assesses 25 separate linguistic anomalies (urgency scores, payload composition, link obfuscation ratios) within ~50ms, achieving 96% validation accuracy without sending data to external AI APIs.
+                  </p>
+                </div>
+              </div>
+              
+              <div>
+                <label className="text-xs font-bold text-[var(--muted-foreground)] mb-2 block uppercase tracking-wider">Android Webhook Configuration Instructions</label>
+                <ol className="list-decimal pl-4 space-y-2 text-xs text-[var(--muted-foreground)] leading-relaxed mb-4">
+                  <li>Download the <strong className="text-white">"SMS to URL Forwarder"</strong> or similar Webhook app on your Android Phone.</li>
+                  <li>In the app, set up a new filter to forward <strong className="text-white">ALL incoming SMS</strong>.</li>
+                  <li>Copy the following Webhook URL exactly and paste it as the target HTTP endpoint:</li>
+                </ol>
+                <div className="flex cursor-pointer hover:opacity-80 transition-opacity" onClick={() => { navigator.clipboard.writeText('http://192.168.0.100:5001/api/sms/webhook'); alert('Webhook URL copied to clipboard'); }}>
+                  <div className="bg-black border border-white/20 border-r-0 rounded-l-xl px-4 py-3 flex-1 flex items-center overflow-x-auto">
+                    <span className="text-[13px] font-mono text-[var(--primary)] whitespace-nowrap select-all tracking-wider">http://192.168.0.100:5001/api/sms/webhook</span>
+                  </div>
+                  <div className="bg-white/10 border border-white/20 rounded-r-xl px-4 flex items-center justify-center hover:bg-white/20">
+                    <Copy size={16} className="text-white font-bold" />
+                  </div>
+                </div>
+              </div>
+              
+              <button onClick={handleSmsConnect}
+                className="w-full mt-4 py-4 rounded-xl text-sm font-black uppercase tracking-wider bg-[var(--primary)] text-[var(--primary-foreground)] hover:shadow-[0_0_40px_rgba(52,178,123,0.4)] transition-all">
+                Activate Webhook Listener
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Social Disconnect Confirmation Modal */}
+      {showSocialDisconnectModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/80 backdrop-blur-md" style={{ animation: 'fadeIn 0.2s ease' }}>
+          <div className="w-full max-w-sm mx-4 bg-[#111614] rounded-3xl border border-white/10 shadow-2xl p-6 text-center" style={{ animation: 'scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
+            <div className="w-16 h-16 rounded-2xl bg-red-500/10 text-red-500 mx-auto flex items-center justify-center mb-4">
+              <MessageSquare size={28} />
+            </div>
+            <h2 className="text-xl font-bold text-[var(--foreground)] mb-2">Disable Social Gateway?</h2>
+            <p className="text-sm text-[var(--muted-foreground)] mb-8">This will stop intercepting notifications from WhatsApp, Instagram, and Telegram. Messages will no longer be analyzed until reconnected.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowSocialDisconnectModal(false)} className="flex-1 py-3 rounded-xl text-sm font-bold border border-white/10 bg-white/5 hover:bg-white/10 text-[var(--foreground)] transition-all">Cancel</button>
+              <button onClick={handleSocialDisconnect} className="flex-1 py-3 rounded-xl text-sm font-bold bg-red-500 text-white hover:bg-red-600 shadow-[0_0_20px_rgba(239,68,68,0.3)] transition-all">Sever Status</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Social Connect Modal */}
+      {showSocialModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md" style={{ animation: 'fadeIn 0.2s ease' }}>
+          <div className="w-full max-w-lg mx-4 rounded-3xl border border-[var(--primary)]/20 bg-[#0a0f0d] shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto" style={{ animation: 'scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}>
+            <div className="px-8 py-6 border-b border-white/5 bg-[var(--primary)]/5 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-[var(--primary)]/10 flex items-center justify-center border border-[var(--primary)]/20"><MessageSquare size={24} className="text-[var(--primary)]" /></div>
+                <div>
+                  <h2 className="text-lg font-black text-[var(--foreground)]">Social Media Gateway</h2>
+                  <p className="text-xs text-[var(--primary)] font-mono uppercase tracking-widest mt-0.5">MacroDroid Notification Bridge</p>
+                </div>
+              </div>
+              <button onClick={() => setShowSocialModal(false)} className="p-2 rounded-xl hover:bg-white/10 text-[var(--muted-foreground)] hover:text-white transition-colors"><X size={20} /></button>
+            </div>
+
+            <div className="p-8 space-y-5 bg-[#111614]">
+              {/* Privacy Consent */}
+              <div className="bg-amber-500/5 border border-amber-500/20 p-4 rounded-xl">
+                <p className="text-[13px] text-amber-400 font-bold mb-2 flex items-center gap-2"><AlertTriangle size={16}/> Privacy Notice</p>
+                <p className="text-[11px] text-[var(--muted-foreground)] leading-relaxed mb-3">
+                  By activating this feature, you consent to Luna analyzing notification text from your selected social media apps (WhatsApp, Instagram). <strong className="text-white">All data stays on your local machine</strong> — nothing is sent to external servers. The ML model runs entirely offline. You can disconnect and purge all data at any time.
+                </p>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input type="checkbox" checked={socialConsentGiven} onChange={(e) => setSocialConsentGiven(e.target.checked)} className="w-4 h-4 rounded accent-[var(--primary)]" />
+                  <span className="text-xs font-bold text-[var(--foreground)]">I understand and consent to local notification analysis</span>
+                </label>
+              </div>
+
+              {/* ML Description */}
+              <div className="bg-white/5 border border-[var(--primary)]/20 p-4 rounded-xl flex items-start gap-4">
+                <Brain size={24} className="text-[var(--primary)] mt-1 flex-shrink-0" />
+                <div>
+                  <p className="text-[13px] text-[var(--foreground)] font-bold mb-1">Advanced ML Classification Engine</p>
+                  <p className="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
+                    Every message is processed by an offline Gradient Boosting classifier trained on 3,000+ labelled samples with TF-IDF vectorisation + 25 structural features. The model evaluates character entropy, URL-to-text ratios, keyword density gradients, and n-gram anomalies — not simple keyword matching. Romance scams, investment fraud, phishing, and brand impersonation are all detected with high confidence. Normal messages are automatically separated into a &quot;Safe&quot; category.
+                  </p>
+                </div>
+              </div>
+
+              {/* MacroDroid Setup */}
+              <div>
+                <label className="text-xs font-bold text-[var(--muted-foreground)] mb-3 block uppercase tracking-wider">MacroDroid Configuration</label>
+                <ol className="list-decimal pl-4 space-y-2 text-xs text-[var(--muted-foreground)] leading-relaxed mb-4">
+                  <li>Install <strong className="text-white">MacroDroid</strong> from Google Play Store</li>
+                  <li>Grant <strong className="text-white">Notification Access</strong> permission in Settings</li>
+                  <li>Create a Macro → Trigger: <strong className="text-white">Notification Received</strong> → Select <strong className="text-white">WhatsApp</strong> &amp; <strong className="text-white">Instagram</strong></li>
+                  <li>Action: <strong className="text-white">HTTP Request (POST)</strong> → Paste the URL below</li>
+                  <li>Set Content Type: <strong className="text-white">application/json</strong></li>
+                  <li>Body: <code className="text-[var(--primary)] bg-black/40 px-1 rounded text-[10px]">{'{"title":"{not_title}","text":"{notification}","app_name":"{not_app_name}","package":"{not_app_package}"}'}</code></li>
+                </ol>
+                <div className="flex cursor-pointer hover:opacity-80 transition-opacity" onClick={() => { navigator.clipboard.writeText('http://192.168.0.100:5001/api/social/webhook'); showToast('Webhook URL copied', 'info'); }}>
+                  <div className="bg-black border border-white/20 border-r-0 rounded-l-xl px-4 py-3 flex-1 flex items-center overflow-x-auto">
+                    <span className="text-[13px] font-mono text-[var(--primary)] whitespace-nowrap select-all tracking-wider">http://192.168.0.100:5001/api/social/webhook</span>
+                  </div>
+                  <div className="bg-white/10 border border-white/20 rounded-r-xl px-4 flex items-center justify-center hover:bg-white/20">
+                    <Copy size={16} className="text-white font-bold" />
+                  </div>
+                </div>
+              </div>
+
+              <button onClick={handleSocialConnect} disabled={!socialConsentGiven}
+                className="w-full mt-4 py-4 rounded-xl text-sm font-black uppercase tracking-wider bg-[var(--primary)] text-[var(--primary-foreground)] hover:shadow-[0_0_40px_rgba(52,178,123,0.4)] transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:shadow-none">
+                {socialConsentGiven ? 'Activate Social Gateway' : 'Accept Privacy Terms First'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+{/* Analysis Loading Overlay */}
       {isAnalyzing && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-xl" style={{ animation: 'fadeIn 0.3s ease' }}>
           <div className="p-10 rounded-3xl border border-[var(--primary)]/30 bg-[#0a0f0d] text-center shadow-[0_0_100px_rgba(52,178,123,0.15)] max-w-sm w-full" style={{ animation: 'scaleIn 0.4s cubic-bezier(0.4, 0, 0.2, 1)' }}>

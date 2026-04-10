@@ -20,6 +20,8 @@ import caseRouter from "./routes/caseRoutes.js";
 import actionRouter from "./routes/actionRoutes.js";
 import metricsRouter from "./routes/metricsRoutes.js";
 import emailRouter from "./routes/emailRoutes.js";
+import smsRouter from "./routes/smsRoutes.js";
+import socialRouter from "./routes/socialRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -99,6 +101,7 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // handles form-encoded bodies from MacroDroid
 
 // Routes
 app.use("/api/gemini", geminiRouter);
@@ -116,6 +119,8 @@ app.use("/api/cases", caseRouter);     // Case management endpoints
 app.use("/api/actions", actionRouter); // Mitigation action endpoints
 app.use("/api/metrics", metricsRouter); // Platform metrics and analytics
 app.use("/api/email", emailRouter);     // Real-time email monitoring
+app.use("/api/sms", smsRouter);         // Real-time SMS monitoring
+app.use("/api/social", socialRouter);   // Real-time social media monitoring
 
 // Health check
 app.get("/", (req, res) => {
