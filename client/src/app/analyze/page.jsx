@@ -58,10 +58,14 @@ export default function AnalyzePage() {
       });
 
       if (!normalizeResponse.ok) {
-        throw new Error('Failed to normalize input');
+        const errorData = await normalizeResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to normalize input');
       }
 
       const normalizeData = await normalizeResponse.json();
+      if (!normalizeData?.artifact) {
+        throw new Error('Invalid normalization response');
+      }
 
       // Then run full analysis
       const analyzeResponse = await fetch(`${SERVER_URL_1}/api/threats/analyze`, {
@@ -79,10 +83,15 @@ export default function AnalyzePage() {
       });
 
       if (!analyzeResponse.ok) {
-        throw new Error('Failed to analyze content');
+        const errorData = await analyzeResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to analyze content');
       }
 
       const analyzeData = await analyzeResponse.json();
+      if (!analyzeData?.analysis) {
+        throw new Error('Invalid analysis response');
+      }
+      
       const analysis = analyzeData.analysis;
       setAnalysisResult(analysis);
 
@@ -144,10 +153,13 @@ export default function AnalyzePage() {
       });
       if (res.ok) {
         const data = await res.json();
-        setGraphData(data.graph);
+        if (data?.graph) {
+          setGraphData(data.graph);
+        }
       }
     } catch (e) {
       console.error('Graph build error:', e);
+      // Don't show error to user, graph is optional
     } finally {
       setIsBuildingGraph(false);
     }
@@ -159,14 +171,17 @@ export default function AnalyzePage() {
       const res = await fetch(`${SERVER_URL_1}/api/threats/correlate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: analysis })
+        body: JSON.stringify({ analysis })
       });
       if (res.ok) {
         const data = await res.json();
-        setCorrelation(data.correlation);
+        if (data?.correlation || data?.total_correlated !== undefined) {
+          setCorrelation(data);
+        }
       }
     } catch (e) {
       console.error('Correlation error:', e);
+      // Don't show error to user, correlation is optional
     }
   };
 
@@ -270,7 +285,33 @@ export default function AnalyzePage() {
           <div className="space-y-6">
             {/* Content Input */}
             <div className="rounded-xl border border-border bg-card p-6">
-              <h2 className="mb-4 text-lg font-semibold text-foreground">Content to Analyze</h2>
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-foreground">Content to Analyze</h2>
+                <select
+                  onChange={(e) => {
+                    if (!e.target.value) return;
+                    const scenarios = {
+                      phishing: "From: PayPal Security <security@paypa1-verify.com>\nSubject: Urgent: Verify Your Account Within 24 Hours\n\nDear Valued Customer,\n\nWe have detected unusual activity on your PayPal account. For your security, we have temporarily limited your account access.\n\nTo restore full access, please verify your identity immediately:\n\nhttps://paypa1-verify.com/account/restore?id=8f4a2b9c\n\n⚠️ WARNING: Failure to verify within 24 hours will result in permanent account suspension.\n\nClick here to begin verification process.",
+                      smishing: "FedEx: Your package delivery failed. Reschedule & track here: http://fedex-tracking.xyz/track?id=FDX9872461 Reply STOP to unsubscribe",
+                      url: "https://microso ft-login.com/oauth/authorize?client_id=a8b2c4d&redirect=https://attacker-infra.net/harvest",
+                      misinfo: "🚨 BREAKING: Mainstream media HIDING the truth! New study PROVES dangerous claims - but Big Pharma doesn't want you to know!\n\n💊 They profit from keeping you sick!\n📰 Mainstream news refuses to cover this!\n🔬 Independent researchers SILENCED!\n\nShare before this gets deleted! #TruthRevealed",
+                      scam: "💰 I turned $500 into $12,000 in just 2 WEEKS!\n\nNo experience needed! DM me 'READY' to get started.\n\nInvestment Fund: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb2\n\n⚠️ Offer expires in 48 hours!",
+                      aml: "Transaction Network Analysis:\n\nEntity A (Corp XYZ Ltd) → Loan $500,000 → Entity B (Offshore Holdings Inc)\nEntity B → Repayment $520,000 → Entity A [7 days later]\nEntity A → New Loan $550,000 → Entity B [1 day later]\n\nPattern: Circular loan structure with increasing principal amounts\nRed Flags: Same parties, short cycles, offshore jurisdiction\nRisk Score: 0.89\nPattern: P2 - Loan Evergreening"
+                    };
+                    setContent(scenarios[e.target.value] || '');
+                    e.target.value = '';
+                  }}
+                  className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground hover:bg-muted transition-colors cursor-pointer"
+                >
+                  <option value="">Load Demo Scenario...</option>
+                  <option value="phishing">📧 PayPal Phishing Email</option>
+                  <option value="smishing">📱 Fake Delivery SMS</option>
+                  <option value="url">🔗 Typosquatted URL</option>
+                  <option value="misinfo">📰 Health Misinformation</option>
+                  <option value="scam">💰 Crypto Investment Scam</option>
+                  <option value="aml">💵 Loan Evergreening (P2)</option>
+                </select>
+              </div>
               <textarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
@@ -499,19 +540,19 @@ export default function AnalyzePage() {
                   <div className="mb-6 flex items-center gap-6">
                     <div className="flex-shrink-0">
                       <div className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-primary bg-primary/10">
-                        <span className="text-3xl font-bold text-primary">{analysisResult.risk_score.overall_score}</span>
+                        <span className="text-3xl font-bold text-primary">{analysisResult.risk_score?.overall_score || 0}</span>
                       </div>
                     </div>
                     <div className="flex-1">
                       <div className="mb-2 flex items-center gap-2">
                         <span className="text-sm font-medium text-muted-foreground">Severity:</span>
                         <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase ${
-                          analysisResult.risk_score.severity === 'critical' ? 'bg-destructive text-destructive-foreground' :
-                          analysisResult.risk_score.severity === 'high' ? 'bg-orange-500 text-white' :
-                          analysisResult.risk_score.severity === 'medium' ? 'bg-yellow-500 text-white' :
+                          analysisResult.risk_score?.severity === 'critical' ? 'bg-destructive text-destructive-foreground' :
+                          analysisResult.risk_score?.severity === 'high' ? 'bg-orange-500 text-white' :
+                          analysisResult.risk_score?.severity === 'medium' ? 'bg-yellow-500 text-white' :
                           'bg-green-500 text-white'
                         }`}>
-                          {analysisResult.risk_score.severity}
+                          {analysisResult.risk_score?.severity || 'unknown'}
                         </span>
                       </div>
                       
@@ -533,17 +574,17 @@ export default function AnalyzePage() {
                       <div className="space-y-2">
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-muted-foreground">Content Risk</span>
-                          <span className="font-semibold text-foreground">{analysisResult.risk_score.content_score}/100</span>
+                          <span className="font-semibold text-foreground">{analysisResult.risk_score?.content_score || 0}/100</span>
                         </div>
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-muted-foreground">Infrastructure Risk</span>
-                          <span className="font-semibold text-foreground">{analysisResult.risk_score.infrastructure_score}/100</span>
+                          <span className="font-semibold text-foreground">{analysisResult.risk_score?.infrastructure_score || 0}/100</span>
                         </div>
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-muted-foreground">Behavior Risk</span>
-                          <span className="font-semibold text-foreground">{analysisResult.risk_score.behavior_score}/100</span>
+                          <span className="font-semibold text-foreground">{analysisResult.risk_score?.behavior_score || 0}/100</span>
                         </div>
-                        {analysisResult.risk_score.financial_score > 0 && (
+                        {(analysisResult.risk_score?.financial_score || 0) > 0 && (
                           <div className="flex items-center justify-between text-sm">
                             <span className="text-muted-foreground">Financial Risk</span>
                             <span className="font-semibold text-foreground">{analysisResult.risk_score.financial_score}/100</span>
@@ -553,7 +594,7 @@ export default function AnalyzePage() {
                     </div>
                   </div>
 
-                  {analysisResult.risk_score.reasons.length > 0 && (
+                  {(analysisResult.risk_score?.reasons?.length || 0) > 0 && (
                     <div>
                       <h3 className="mb-2 text-sm font-semibold text-foreground">Risk Reasons</h3>
                       <ul className="space-y-1.5">

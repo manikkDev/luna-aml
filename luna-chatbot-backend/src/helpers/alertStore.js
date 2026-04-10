@@ -10,6 +10,7 @@
 
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
+import { recordAlertGenerated } from './metricsStore.js';
 
 // ─── Event bus (used by SSE endpoint) ────────────────────────────────────────
 export const alertEvents = new EventEmitter();
@@ -119,6 +120,9 @@ export function addAlert(alertData) {
 
   // Auto-group similar alerts
   autoGroup(alert);
+
+  // Record metrics
+  try { recordAlertGenerated(alert); } catch(e) { console.error('Metrics error:', e); }
 
   // Notify SSE subscribers
   alertEvents.emit('alert', alert);

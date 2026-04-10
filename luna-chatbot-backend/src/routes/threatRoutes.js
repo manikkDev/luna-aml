@@ -33,6 +33,7 @@ import {
 } from '../types/patternRegistry.js';
 import { ALL_FIXTURES, FIXTURE_BY_CODE } from '../data/digitalThreatFixtures.js';
 import { generateAlertsFromAnalysis } from '../helpers/alertEngine.js';
+import { recordThreatAnalyzed } from '../helpers/metricsStore.js';
 
 const router = express.Router();
 
@@ -221,6 +222,13 @@ router.post('/analyze', async (req, res) => {
 
     // Auto-generate alerts (fire-and-forget, never block the response)
     const generatedAlerts = generateAlertsFromAnalysis(analysisResult);
+
+    // Record metrics (fire-and-forget)
+    try {
+      recordThreatAnalyzed(analysisResult);
+    } catch (e) {
+      console.error('Metrics error:', e);
+    }
 
     res.json({
       success: true,

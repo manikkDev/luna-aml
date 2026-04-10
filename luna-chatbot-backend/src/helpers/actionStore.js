@@ -8,6 +8,7 @@
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { addTimelineEvent } from './caseStore.js';
+import { recordActionSuggested, recordActionCompleted } from './metricsStore.js';
 
 export const actionEvents = new EventEmitter();
 actionEvents.setMaxListeners(50);
@@ -79,6 +80,9 @@ export function createAction({
     addTimelineEvent(case_id, 'action_created', `Action suggested: ${title}`, { action_id: id, action_type, status });
   }
 
+  // Record metrics
+  try { recordActionSuggested(); } catch(e) { console.error('Metrics error:', e); }
+
   actionEvents.emit('actionCreated', action);
   return action;
 }
@@ -110,6 +114,11 @@ export function updateActionStatus(actionId, status, outcome = null, notes = '')
   // Timeline event
   if (action.case_id) {
     addTimelineEvent(action.case_id, 'action_updated', `Action ${status}: ${action.title}`, { action_id: actionId, old_status: oldStatus, new_status: status, outcome });
+  }
+
+  // Record metrics for completed actions
+  if (status === ACTION_STATUS.COMPLETED) {
+    try { recordActionCompleted(); } catch(e) { console.error('Metrics error:', e); }
   }
 
   actionEvents.emit('actionUpdated', action);

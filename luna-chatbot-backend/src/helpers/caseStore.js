@@ -7,6 +7,7 @@
 
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
+import { recordCaseCreated } from './metricsStore.js';
 
 export const caseEvents = new EventEmitter();
 caseEvents.setMaxListeners(50);
@@ -66,6 +67,9 @@ export function createCase({
 
   // Add initial timeline event
   addTimelineEvent(id, 'case_created', `Case created by ${created_by}`, { created_by, severity, threat_family });
+
+  // Record metrics
+  try { recordCaseCreated(); } catch(e) { console.error('Metrics error:', e); }
 
   caseEvents.emit('caseCreated', caseRecord);
   return caseRecord;
