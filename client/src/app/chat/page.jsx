@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useCallback, useMemo, useState, useRef, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
 import { ChatForm } from "@/components/ui/chat"
 import { CopyButton } from "@/components/ui/copy-button"
 import { MessageInput } from "@/components/ui/message-input"
@@ -18,6 +19,11 @@ import {
   X,
   BookOpen,
   MessageCircle,
+  Shield,
+  AlertTriangle,
+  Link as LinkIcon,
+  Radio,
+  DollarSign,
 } from "lucide-react"
 import { SuggestionDropdown } from "@/components/ui/suggestion-dropdown"
 import { fuzzySearch } from "@/services/suggestions/fuzzy"
@@ -296,6 +302,44 @@ export default function ChatPage() {
   const [viewportHeight, setViewportHeight] = useState("100dvh")
   const [historyQuery, setHistoryQuery] = useState("")
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false)
+  const searchParams = useSearchParams()
+  const [investigationMode, setInvestigationMode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const m = params.get('mode') || params.get('investigationMode') || 'copilot'
+      return m
+    }
+    return 'copilot'
+  })
+  const [activeModeBadge, setActiveModeBadge] = useState(null)
+  const [analysisContext, setAnalysisContext] = useState(null)
+
+  // Consume analysis context from sessionStorage when arriving from analyze page
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('context') === 'analysis') {
+      try {
+        const raw = sessionStorage.getItem('luna_analysis_context')
+        if (raw) {
+          const ctx = JSON.parse(raw)
+          setAnalysisContext(ctx)
+          sessionStorage.removeItem('luna_analysis_context')
+          // Inject a context-aware welcome message
+          const score = ctx.risk_score?.overall_score ?? 0
+          const family = ctx.classification?.primary_family?.replace(/_/g,' ') || 'unknown'
+          const greetMsg = `I've loaded your analysis context.\n\n**Artifact:** \`${ctx.artifact_id || 'unknown'}\`\n**Threat family:** ${family}\n**Risk score:** ${score}/100\n**Indicators extracted:** ${ctx.indicators?.length || 0}\n\nHow would you like me to assist? I can write an analyst brief, explain the attack technique, suggest next investigation steps, or produce an executive summary.`
+          setMessages([{
+            id: crypto.randomUUID(),
+            role: 'assistant',
+            content: greetMsg,
+            createdAt: new Date(),
+            sources: [], images: [], videos: [], socialProfiles: [], isComplete: true,
+          }])
+        }
+      } catch (_) {}
+    }
+  }, [])
 
   const displayName = user?.username || user?.name || "User"
   const displayEmail = user?.email ?? ""
@@ -540,7 +584,7 @@ export default function ChatPage() {
         response = await fetch(`${LUNA_CHAT_BASE}/stream`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: userContent, options: { includeYouTube, includeImageSearch } }),
+          body: JSON.stringify({ prompt: userContent, options: { includeYouTube, includeImageSearch, investigationMode, analysisContext: analysisContext || undefined } }),
           signal: abortControllerRef.current.signal,
         })
       }
@@ -600,7 +644,9 @@ export default function ChatPage() {
         if (!data) return
         try {
           const parsed = JSON.parse(data)
-          if (currentEvent === "conversationId" || parsed.conversationId) {
+          if (currentEvent === "investigationMode") {
+            if (parsed.mode) setActiveModeBadge(parsed.mode)
+          } else if (currentEvent === "conversationId" || parsed.conversationId) {
             resolvedConversationId = parsed.conversationId
             if (parsed.conversationId !== currentConversationId) setCurrentConversationId(parsed.conversationId)
           } else if (currentEvent === "message" && parsed.text && typeof parsed.text === "string") {
@@ -1267,6 +1313,41 @@ export default function ChatPage() {
               <button type="button" className="hud-btn" onClick={startNewChat}>
                 <Plus style={{ width: 13, height: 13 }} /> New chat
               </button>
+
+              {/* Investigation mode selector */}
+              <div style={{ position: "relative" }}>
+                <select
+                  value={investigationMode}
+                  onChange={e => setInvestigationMode(e.target.value)}
+                  style={{
+                    height: 32, paddingLeft: 10, paddingRight: 10,
+                    background: "rgba(var(--accent-rgb),0.08)",
+                    border: "1px solid rgba(var(--accent-rgb),0.25)",
+                    borderRadius: 8,
+                    fontFamily: "var(--font-mono)", fontSize: "0.72rem",
+                    color: "rgba(var(--accent-rgb),1)",
+                    cursor: "pointer", outline: "none",
+                  }}
+                >
+                  <option value="copilot">Threat Copilot</option>
+                  <option value="phishing">Phishing / Impersonation</option>
+                  <option value="url">URL / Attachment</option>
+                  <option value="campaigns">Misinformation / Campaigns</option>
+                  <option value="aml">AML / Financial</option>
+                </select>
+              </div>
+              {activeModeBadge && (
+                <span style={{
+                  height: 22, padding: "0 8px", borderRadius: 6,
+                  background: "rgba(var(--accent-rgb),0.12)",
+                  border: "1px solid rgba(var(--accent-rgb),0.3)",
+                  fontFamily: "var(--font-mono)", fontSize: "0.62rem",
+                  color: "rgba(var(--accent-rgb),0.9)",
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                }}>
+                  ● {activeModeBadge}
+                </span>
+              )}
 
               {/* History dropdown */}
               <div className="history-dropdown" style={{ position: "relative" }}>

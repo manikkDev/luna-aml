@@ -32,6 +32,7 @@ import {
   GRAPH_NODE_TYPES, GRAPH_EDGE_TYPES
 } from '../types/patternRegistry.js';
 import { ALL_FIXTURES, FIXTURE_BY_CODE } from '../data/digitalThreatFixtures.js';
+import { generateAlertsFromAnalysis } from '../helpers/alertEngine.js';
 
 const router = express.Router();
 
@@ -217,10 +218,15 @@ router.post('/analyze', async (req, res) => {
     analysisResult.features = scoringResult.features;
     analysisResult.classification = scoringResult.classification;
     analysisResult.total_risk_signals = scoringResult.total_risk_signals;
-    
+
+    // Auto-generate alerts (fire-and-forget, never block the response)
+    const generatedAlerts = generateAlertsFromAnalysis(analysisResult);
+
     res.json({
       success: true,
-      analysis: analysisResult
+      analysis: analysisResult,
+      alerts_generated: generatedAlerts.length,
+      alert_ids: generatedAlerts.map(a => a.alert_id)
     });
     
   } catch (error) {

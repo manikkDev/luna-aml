@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from 'react';
-import { Shield, Upload, Link as LinkIcon, FileText, Image as ImageIcon, Mail, MessageSquare, AlertTriangle, GitMerge, Network } from 'lucide-react';
+import { Shield, Upload, Link as LinkIcon, FileText, Image as ImageIcon, Mail, MessageSquare, AlertTriangle, GitMerge, Network, MessageCircle } from 'lucide-react';
 import { SERVER_URL_1 } from '@/utils/commonHelper';
 import ThreatGraphViewer from '@/components/ThreatGraphViewer';
 import PatternResult from '@/components/PatternResult';
@@ -303,13 +303,34 @@ export default function AnalyzePage() {
               
               {analysisResult && (
                 <div className="mt-3">
-                  <a
-                    href={`/chat?context=threat_analysis&artifact_id=${analysisResult.artifact_id}`}
-                    className="flex items-center justify-center gap-2 rounded-lg border border-primary bg-primary/5 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
+                  <button
+                    onClick={() => {
+                      const family = analysisResult.classification?.primary_family || 'unknown';
+                      const modeMap = {
+                        phishing: 'phishing', impersonation: 'phishing',
+                        malicious_url: 'url', malicious_attachment: 'url',
+                        social_engineering_scam: 'campaigns', misinformation: 'campaigns',
+                        aml_financial_threat: 'aml',
+                      };
+                      const mode = modeMap[family] || 'copilot';
+                      const ctx = {
+                        artifact_id: analysisResult.artifact_id,
+                        input_type: analysisResult.input_type || selectedMode.id,
+                        risk_score: analysisResult.risk_score,
+                        classification: analysisResult.classification,
+                        indicators: (analysisResult.indicators || []).slice(0, 10),
+                        entities: (analysisResult.entities || []).slice(0, 8),
+                        claims: (analysisResult.claims || []).slice(0, 5),
+                        correlation: correlation || undefined,
+                      };
+                      try { sessionStorage.setItem('luna_analysis_context', JSON.stringify(ctx)); } catch(_) {}
+                      window.location.href = `/chat?mode=${mode}&context=analysis&artifact_id=${analysisResult.artifact_id}`;
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary bg-primary/5 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/10 transition-colors"
                   >
-                    <MessageSquare className="h-4 w-4" />
-                    Discuss in Threat Investigator
-                  </a>
+                    <MessageCircle className="h-4 w-4" />
+                    Discuss in Copilot
+                  </button>
                 </div>
               )}
             </div>

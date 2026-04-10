@@ -12,6 +12,7 @@ import {
 } from "../helpers/gemini.js";
 import { searchImages } from "../helpers/imageSearch.js";
 import { buildAmlAssistantPrompt } from "../prompts/FinancialAI.js";
+import { buildCopilotPrompt, resolveInvestigationMode } from "../prompts/copilotPrompt.js";
 import YouTubeMCP from "../helpers/youtubeSearch.js";
 import env from "../config/env.js";
 import { processMermaidBlocks } from "../helpers/mermaid.js";
@@ -769,8 +770,12 @@ export async function handleChatStreamGenerate(req, res) {
       typeof options.includeSearch === "boolean" ? options.includeSearch : true;
     const includeImageSearch = options.includeImageSearch !== false;
     const includeYouTube = options.includeYouTube === true; // Opt-in for YouTube search
-    const systemPrompt =
-      options.systemPrompt || buildAmlAssistantPrompt(username);
+
+    // Mode-aware system prompt — supports multi-domain copilot + legacy AML
+    const investigationMode = resolveInvestigationMode(options.investigationMode || options.mode);
+    const analysisContext = options.analysisContext || null;
+    const systemPrompt = options.systemPrompt
+      || buildCopilotPrompt(investigationMode, username, analysisContext);
     const uploadContext = uploadedText ? uploadedText.slice(0, 400) : "";
     const contextualSearchQuery = buildContextualSearchQuery({
       prompt,
@@ -824,6 +829,10 @@ export async function handleChatStreamGenerate(req, res) {
     res.write(
       `data: ${JSON.stringify({ conversationId: currentConversationId })}\n\n`,
     );
+
+    // Emit active investigation mode so frontend can show mode badge
+    res.write(`event: investigationMode\n`);
+    res.write(`data: ${JSON.stringify({ mode: investigationMode, hasAnalysisContext: !!analysisContext })}\n\n`);
 
     if (transactionContext?.structured) {
       res.write(`event: transactions\n`);
